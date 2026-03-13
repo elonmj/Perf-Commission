@@ -120,15 +120,13 @@ def pivot_data(df, qty_label="Add"):
 def build_tariff_grid(df_raw):
     if df_raw.empty: return []
     grid = []
-    channels = df_raw['real_channel'].dropna().unique()
-    for ch in sorted(channels):
-        ch_data = df_raw[df_raw['real_channel'] == ch]
-        row = {'Canal': ch, 'Semaine': 0, 'Weekend': 0, 'Dimanche': 0}
-        for p in ['Semaine', 'Weekend', 'Dimanche']:
-            p_data = ch_data[ch_data['periode_nom'] == p]
-            if not p_data.empty:
-                row[p] = int(p_data['pu'].max())
-        grid.append(row)
+    # We only need one row of tariffs for the file type, removing 'Canal'
+    row = {'Semaine': 0, 'Weekend': 0, 'Dimanche': 0}
+    for p in ['Semaine', 'Weekend', 'Dimanche']:
+        p_data = df_raw[df_raw['periode_nom'] == p]
+        if not p_data.empty:
+            row[p] = int(p_data['pu'].max())
+    grid.append(row)
     return grid
 
 def write_sheet(wb, sheet_name, df_pivot, df_raw, date_start, date_end, data_type="GADD"):
@@ -143,7 +141,7 @@ def write_sheet(wb, sheet_name, df_pivot, df_raw, date_start, date_end, data_typ
     
     # 2. MINI-TABLEAU TARIFAIRE (Gelé en haut)
     ws.cell(3, 1, "RAPPEL DES TARIFS (PU Appliqué)").font = Font(bold=True, underline="single", color="2F5496")
-    for c, h in enumerate(["Canal", "PU Semaine", "PU Weekend", "PU Dimanche"], 1):
+    for c, h in enumerate(["PU Semaine", "PU Weekend", "PU Dimanche"], 1):
         cell = ws.cell(4, c, h)
         cell.font = SUB_HEADER_FONT
         cell.fill = SUB_HEADER_FILL
@@ -152,11 +150,10 @@ def write_sheet(wb, sheet_name, df_pivot, df_raw, date_start, date_end, data_typ
         
     row_idx = 5
     for item in build_tariff_grid(df_raw):
-        for c, key in enumerate(["Canal", "Semaine", "Weekend", "Dimanche"], 1):
+        for c, key in enumerate(["Semaine", "Weekend", "Dimanche"], 1):
             cell = ws.cell(row_idx, c, item[key])
             cell.border = THIN_BORDER
-            if key != "Canal":
-                cell.number_format = CURRENCY_FMT
+            cell.number_format = CURRENCY_FMT
         row_idx += 1
         
     # Espace
@@ -220,8 +217,8 @@ def write_sheet(wb, sheet_name, df_pivot, df_raw, date_start, date_end, data_typ
     auto_width(ws)
     
     # 6. GEL DES VOLETS (FREEZE PANES) - LA TOUCHE MAGIQUE EXPERIENCIE CLIENT !
-    # On fige les entêtes de colonnes ET les 5 premières colonnes (Agent, etc.)
-    ws.freeze_panes = ws.cell(start_data_row + 1, 6)
+    # On fige les entêtes de colonnes ET la 1ère colonne (Agent)
+    ws.freeze_panes = ws.cell(start_data_row + 1, 2)
 
 def resolve_date_range(engine, args):
     """Determine la plage de dates selon : args CLI > config.py > base complete."""
@@ -268,9 +265,9 @@ def main():
     df_ads_raw  = fetch_data(engine, "vw_commission_ads", "ads", "commission_ads", date_start, date_end)
 
     FILE_GROUPS = {
-        "BA_Animation": ["Animation Pick-up", "Animation POS"],
-        "BA_Classiques_Agence": ["BA", "BA_AGENCE"],
-        "MA_Acquisition": ["MA"]
+        "BA Animation": ["Animation Pick-up", "Animation POS"],
+        "BA Classiques & BA AGENCE": ["BA", "BA_AGENCE"],
+        "MA Acquisition": ["MA"]
     }
 
     OUTPUTS.mkdir(exist_ok=True)
@@ -293,10 +290,10 @@ def main():
         if wb.active is not None:
             wb.remove(wb.active)
 
-        write_sheet(wb, "GADD Commissions", df_gadd, df_g_grp, date_start, date_end, "GADD")
-        write_sheet(wb, "ADS Commissions", df_ads, df_a_grp, date_start, date_end, "ADS")
+        write_sheet(wb, "New Add (GADD)", df_gadd, df_g_grp, date_start, date_end, f"Variables {group_name} - New Add")
+        write_sheet(wb, "New UserData (ADS)", df_ads, df_a_grp, date_start, date_end, f"Variables {group_name} - New UserData")
 
-        out_name = f"commission_{group_name}_{date_start}_au_{date_end}.xlsx"
+        out_name = f"Variables {group_name} {date_start.strftime('%d-%m-%Y')} - {date_end.strftime('%d-%m-%Y')}.xlsx"
         out_path = OUTPUTS / out_name
         wb.save(out_path)
         

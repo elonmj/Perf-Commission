@@ -24,6 +24,7 @@ from connections.config import (
 DDL_AGENT_INFO = f"""
 CREATE TABLE IF NOT EXISTS `{TABLE_AGENT_INFO}` (
     `user_name`     VARCHAR(255) NOT NULL,
+    `id_pulse`      VARCHAR(100) DEFAULT NULL,
     `region`        VARCHAR(100) DEFAULT NULL,
     `departement`   VARCHAR(100) DEFAULT NULL,
     `commune`       VARCHAR(100) DEFAULT NULL,

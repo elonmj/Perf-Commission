@@ -39,23 +39,35 @@ from connections.config import (
 )
 
 
-def find_latest_commission(override: str = None) -> Path:
+def find_latest_commissions(override: str | None = None) -> list[Path]:
     if override:
         p = Path(override)
         if not p.exists():
             p = ROOT / override
         if not p.exists():
             raise FileNotFoundError(f"Fichier introuvable : {override}")
-        return p
+        return [p]
 
+    # Look for the new format "Variables*.xlsx"
     files = sorted(
-        OUTPUTS.glob("commission_*.xlsx"),
+        OUTPUTS.glob("Variables*.xlsx"),
         key=lambda f: f.stat().st_mtime,
         reverse=True,
     )
     if not files:
+        # Fallback to old format
+        files = sorted(
+            OUTPUTS.glob("commission_*.xlsx"),
+            key=lambda f: f.stat().st_mtime,
+            reverse=True,
+        )
+    if not files:
         raise FileNotFoundError("Aucun fichier commission dans outputs/")
-    return files[0]
+        
+    # We group by the modification time roughly (files generated within the same minute)
+    # or just take the top 3 files since we know we generate 3 files recently.
+    recent_files = files[:3]
+    return recent_files
 
 
 def load_sync_errors() -> list[str]:
@@ -69,7 +81,7 @@ def load_sync_errors() -> list[str]:
         return []
 
 
-def build_html_body(date_part: str, file_name: str, sync_errors: list[str]) -> str:
+def build_html_body(date_part: str, file_names: list[str], sync_errors: list[str]) -> str:
     """Construit le corps HTML de l'email."""
     errors_html = ""
     if sync_errors:
@@ -91,41 +103,41 @@ def build_html_body(date_part: str, file_name: str, sync_errors: list[str]) -> s
             <p style="margin:0;color:#155724;">✅ Synchronisation MySQL terminée sans erreur.</p>
         </div>
         """
+        
+    files_html = "".join([f"<li>📎 <strong>{f}</strong></li>" for f in file_names])
 
     return f"""
     <html>
     <body style="font-family:Segoe UI,Arial,sans-serif;color:#333;max-width:700px;margin:auto;">
         <div style="background:#2F5496;color:white;padding:20px;border-radius:8px 8px 0 0;">
-            <h1 style="margin:0;font-size:22px;">📊 Commission LKA — {date_part}</h1>
+            <h1 style="margin:0;font-size:22px;">📊 Commission LKA</h1>
             <p style="margin:5px 0 0;opacity:0.9;">Pipeline automatique Perf Commissions</p>
         </div>
 
         <div style="padding:20px;background:#f8f9fa;border:1px solid #e0e0e0;border-top:none;">
-            <h2 style="color:#2F5496;margin-top:0;">Fichier joint</h2>
-            <p>📎 <strong>{file_name}</strong></p>
+            <h2 style="color:#2F5496;margin-top:0;">Fichiers joints</h2>
+            <ul>
+                {files_html}
+            </ul>
 
-            <h3 style="color:#2F5496;">Contenu du fichier :</h3>
+            <h3 style="color:#2F5496;">Contenu des fichiers :</h3>
             <table style="border-collapse:collapse;width:100%;">
                 <tr style="background:#2F5496;color:white;">
                     <th style="padding:8px 12px;text-align:left;">Feuille</th>
                     <th style="padding:8px 12px;text-align:left;">Description</th>
                 </tr>
                 <tr style="background:white;">
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>Résumé</strong></td>
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Taux de commission, totaux GADD/ADS, commission globale</td>
+                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>New Add (GADD)</strong></td>
+                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Détail des commissions GADD par agent</td>
                 </tr>
                 <tr style="background:#f2f2f2;">
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>GADD</strong></td>
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Détail GADD par agent avec formules de commission</td>
-                </tr>
-                <tr style="background:white;">
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>ADS</strong></td>
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Détail ADS par agent avec formules de commission</td>
+                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>New UserData (ADS)</strong></td>
+                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Détail des commissions ADS par agent</td>
                 </tr>
             </table>
 
             <p style="margin-top:15px;font-size:13px;color:#666;">
-                💡 Les formules de commission sont préservées — ouvrez avec Excel pour recalculer.
+                💡 Les données sont structurées avec une section de rappel tarifaire en début de feuille.
             </p>
 
             {errors_html}
@@ -164,10 +176,18 @@ def get_gmail_service():
     return build("gmail", "v1", credentials=creds)
 
 
-def send_email(file_path: Path, recipient: str):
-    """Envoie le fichier par email via l'API Gmail OAuth 2.0 avec corps HTML."""
-    stem = file_path.stem
-    date_part = stem.replace("commission_", "")
+def send_email(file_paths: list[Path], recipient: str):
+    """Envoie les fichiers par email via l'API Gmail OAuth 2.0 avec corps HTML."""
+    if not file_paths:
+        print("Aucun fichier à envoyer.")
+        return
+
+    # Use the date part from the first file (assuming they all share the same date range)
+    stem = file_paths[0].stem
+    
+    # Simple extraction logic of dates string
+    date_part = stem.split(" ", 2)[-1] if " " in stem else stem
+        
     subject = COMMISSION_SUBJECT_TPL.format(date=date_part)
 
     sync_errors = load_sync_errors()
@@ -176,23 +196,26 @@ def send_email(file_path: Path, recipient: str):
     msg["From"] = GMAIL_USER
     msg["To"] = recipient
     msg["Subject"] = subject
+    
+    file_names = [f.name for f in file_paths]
 
-    html_body = build_html_body(date_part, file_path.name, sync_errors)
+    html_body = build_html_body(date_part, file_names, sync_errors)
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-    # Piece jointe
-    with open(file_path, "rb") as f:
-        part = MIMEBase(
-            "application",
-            "vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    # Pieces jointes
+    for file_path in file_paths:
+        with open(file_path, "rb") as f:
+            part = MIMEBase(
+                "application",
+                "vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+            part.set_payload(f.read())
+        encoders.encode_base64(part)
+        part.add_header(
+            "Content-Disposition",
+            f"attachment; filename=\"{file_path.name}\"",
         )
-        part.set_payload(f.read())
-    encoders.encode_base64(part)
-    part.add_header(
-        "Content-Disposition",
-        f"attachment; filename={file_path.name}",
-    )
-    msg.attach(part)
+        msg.attach(part)
 
     # Envoi via API Gmail
     service = get_gmail_service()
@@ -213,20 +236,21 @@ def send_email(file_path: Path, recipient: str):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--file", default=None, help="Chemin fichier commission")
+    parser.add_argument("--file", default=None, help="Chemin fichier commission (si specifie, n'envoie que celui-ci)")
     parser.add_argument("--to", default=None, help="Destinataire (defaut: config)")
     args = parser.parse_args()
 
     print("=== 06_send_report.py -- Envoi commission (HTML) ===\n")
 
-    file_path = find_latest_commission(args.file)
+    file_paths = find_latest_commissions(args.file)
     recipient = args.to or COMMISSION_RECIPIENT
 
-    print(f"  Fichier   : {file_path.name}")
+    for f in file_paths:
+        print(f"  Fichier   : {f.name}")
     print(f"  Dest.     : {recipient}")
     print()
 
-    send_email(file_path, recipient)
+    send_email(file_paths, recipient)
 
     print()
     print("Envoi termine.")

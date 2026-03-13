@@ -50,7 +50,7 @@ def mark_done():
     FLAG_PATH.write_text(str(date.today()))
 
 
-def run_step(name: str, script: str, extra_args: list = None) -> bool:
+def run_step(name: str, script: str, extra_args: list | None = None) -> bool:
     """Execute un script Python et retourne True si succes."""
     cmd = [sys.executable, str(ROOT / script)]
     if extra_args:
@@ -148,6 +148,9 @@ def main():
 
     # 05 — Commission
     steps.append(("05 - Commission", "scripts/05_commission.py"))
+
+    # 05b — Audit Excel files
+    steps.append(("05b - Inspect Excel", "scripts/inspect_excel.py", ["--strict"]))
 
     # 06 — Send
     if not args.skip_send:
