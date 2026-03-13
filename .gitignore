@@ -1,0 +1,33 @@
+# ─── DONNÉES & FICHIERS GÉNÉRÉS ─────────────────────────────────────────────
+data/
+inputs/
+outputs/
+cumul/
+reports/
+logs/
+
+# ─── SECRETS & CREDENTIALS ──────────────────────────────────────────────────
+.env
+connections/credentials.json
+connections/token.json
+
+# ─── PYTHON ─────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+
+# ─── OS & IDE ───────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*~
+Thumbs.db
+~$*
+
+# ─── PIPELINE FLAG ──────────────────────────────────────────────────────────
+last_success.txt
