@@ -8,8 +8,8 @@ COPY requirements-api.txt .
 # Installer les dépendances
 RUN pip install --no-cache-dir -r requirements-api.txt
 
-# Copier le code de l'API
-COPY api.py .
+# Copier tout le projet (connexions, scripts, api)
+COPY . .
 
 # Exposer le port de l'API
 EXPOSE 8000

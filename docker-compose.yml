@@ -8,3 +8,5 @@ services:
     container_name: lka_perf_api
     restart: always
     network_mode: "host"
+    env_file:
+      - .env
