@@ -39,6 +39,8 @@ from connections.config import (
 FLAG_PATH = ROOT / FLAG_FILE
 
 
+import time
+
 def already_done_today() -> bool:
     if not FLAG_PATH.exists():
         return False
@@ -50,8 +52,10 @@ def mark_done():
     FLAG_PATH.write_text(str(date.today()))
 
 
-def run_step(name: str, script: str, extra_args: list | None = None) -> bool:
-    """Execute un script Python et retourne True si succes."""
+def run_step(name: str, script: str, extra_args: list | None = None) -> tuple[bool, str]:   
+    """Execute un script Python et retourne (succes, traceback_si_echec)."""
+    start_time = time.time()
+
     cmd = [sys.executable, str(ROOT / script)]
     if extra_args:
         cmd.extend(extra_args)
@@ -61,14 +65,26 @@ def run_step(name: str, script: str, extra_args: list | None = None) -> bool:
     print(f"  CMD   : {' '.join(cmd)}")
     print(f"{'='*60}\n")
 
-    result = subprocess.run(cmd, cwd=str(ROOT))
+    # Capture de la sortie pour récupérer le traceback
+    result = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True)
+    
+    elapsed = time.time() - start_time
+
+    # Affichage de la sortie capturée
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, file=sys.stderr, end="")
+
+    print(f"\n  ⏱️ Temps d'exécution : {elapsed:.2f} secondes")
 
     if result.returncode != 0:
-        print(f"\n  ERREUR : {name} a echoue (exit code {result.returncode})")
-        return False
+        print(f"\n  ERREUR : {name} a echoue (exit code {result.returncode})")  
+        error_log = result.stderr if result.stderr.strip() else result.stdout
+        return False, error_log
 
     print(f"\n  OK : {name} termine avec succes.")
-    return True
+    return True, ""
 
 
 def notify_failure(step_name: str, error_detail: str = ""):
@@ -162,9 +178,11 @@ def main():
         script = step[1]
         extra = step[2] if len(step) > 2 else None
 
-        ok = run_step(name, script, extra)
+        ok, err_log = run_step(name, script, extra)
         if not ok:
-            notify_failure(name)
+            # Tronque très grand log d'erreur avant de l'envoyer dans l'email
+            err_body = err_log[-3500:] if len(err_log) > 3500 else err_log
+            notify_failure(name, f"LOG D'ERREUR/Traceback :\n{err_body}")
             print(f"\n  PIPELINE ARRETE a l'etape : {name}")
             sys.exit(1)
 
