@@ -244,30 +244,34 @@ def resolve_date_range(engine, args):
         end = row[0]
         
         # Trouver la dernière date traitée dans les fichiers du répertoire outputs/
-        pattern = r"commission_.*?(\d{4}-\d{2}-\d{2})\.xlsx$"
+        pattern_old = r"commission_.*?(\d{4}-\d{2}-\d{2})\.xlsx$"
+        pattern_new = r"Variables .* (\d{2}-\d{2}-\d{4})\.xlsx$"
+        
         dates_trouvees = []
         if os.path.exists(OUTPUTS):
             for f in os.listdir(OUTPUTS):
-                m = re.search(pattern, f)
-                if m:
-                    dates_trouvees.append(m.group(1))
+                # Ancien format
+                m_old = re.search(pattern_old, f)
+                if m_old:
+                    dates_trouvees.append(datetime.strptime(m_old.group(1), "%Y-%m-%d").date())
+                
+                # Nouveau format
+                m_new = re.search(pattern_new, f)
+                if m_new:
+                    dates_trouvees.append(datetime.strptime(m_new.group(1), "%d-%m-%Y").date())
                     
         if dates_trouvees:
-            last_comm_date = datetime.strptime(max(dates_trouvees), "%Y-%m-%d").date()
+            last_comm_date = max(dates_trouvees)
             dyn_start = last_comm_date + timedelta(days=1)
-        else:
-            dyn_start = end - timedelta(days=AUTO_DAYS_RANGE - 1)
-
-        # Si le calcul produit une date future par erreur, rétrograder
-        if dyn_start > end:
-            dyn_start = end - timedelta(days=AUTO_DAYS_RANGE - 1)
             
-        # Période minimum dictée par AUTO_DAYS_RANGE (ex: 3 jours constants mininum)
-        delta_jours = (end - dyn_start).days + 1
-        if delta_jours < AUTO_DAYS_RANGE:
-            start = end - timedelta(days=AUTO_DAYS_RANGE - 1)
+            if dyn_start > end:
+                # Si on a déjà généré jusqu'à end, on refait juste le dernier jour par sécurité
+                # ou on laisse start = end
+                start = end
+            else:
+                start = dyn_start
         else:
-            start = dyn_start
+            start = end - timedelta(days=AUTO_DAYS_RANGE - 1)
 
         return (start, end)
     else:
