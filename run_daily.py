@@ -184,6 +184,10 @@ def main():
     if not args.skip_send:
         steps.append(("06 - Send Report", "scripts/06_send_report.py"))
 
+    # 07 - Weekly Summary (S'auto-régule, aucun envoi si semaine non complète)
+    if not args.skip_send:
+        steps.append(("07 - Weekly Summary", "scripts/07_weekly_summary.py"))
+
     # Execution sequentielle
     for step in steps:
         name = step[0]
