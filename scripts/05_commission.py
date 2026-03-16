@@ -221,8 +221,10 @@ def write_sheet(wb, sheet_name, df_pivot, df_raw, date_start, date_end, data_typ
     ws.freeze_panes = ws.cell(start_data_row + 1, 2)
 
 def resolve_date_range(engine, args):
-    """Determine la plage de dates selon : args CLI > config.py > base complete."""
+    """Determine la plage de dates selon : args CLI > config.py > extractions outputs."""
     from datetime import timedelta
+    import re
+    import os
 
     # 1. Arguments CLI explicites (prioritaires)
     if args.week:
@@ -240,7 +242,33 @@ def resolve_date_range(engine, args):
             print("Aucune donnee dans daily_gadd.")
             sys.exit(1)
         end = row[0]
-        start = end - timedelta(days=AUTO_DAYS_RANGE - 1)
+        
+        # Trouver la dernière date traitée dans les fichiers du répertoire outputs/
+        pattern = r"commission_.*?(\d{4}-\d{2}-\d{2})\.xlsx$"
+        dates_trouvees = []
+        if os.path.exists(OUTPUTS):
+            for f in os.listdir(OUTPUTS):
+                m = re.search(pattern, f)
+                if m:
+                    dates_trouvees.append(m.group(1))
+                    
+        if dates_trouvees:
+            last_comm_date = datetime.strptime(max(dates_trouvees), "%Y-%m-%d").date()
+            dyn_start = last_comm_date + timedelta(days=1)
+        else:
+            dyn_start = end - timedelta(days=AUTO_DAYS_RANGE - 1)
+
+        # Si le calcul produit une date future par erreur, rétrograder
+        if dyn_start > end:
+            dyn_start = end - timedelta(days=AUTO_DAYS_RANGE - 1)
+            
+        # Période minimum dictée par AUTO_DAYS_RANGE (ex: 3 jours constants mininum)
+        delta_jours = (end - dyn_start).days + 1
+        if delta_jours < AUTO_DAYS_RANGE:
+            start = end - timedelta(days=AUTO_DAYS_RANGE - 1)
+        else:
+            start = dyn_start
+
         return (start, end)
     else:
         end = datetime.strptime(MANUAL_END_DATE, "%Y-%m-%d").date()
