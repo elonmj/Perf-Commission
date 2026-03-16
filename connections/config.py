@@ -113,7 +113,7 @@ ADMIN_EMAIL = os.environ.get("PERF_ADMIN_EMAIL", "joselonm@gmail.com")
 # ─── CONFIGURATION BI (Génération des Commissions) ─────────────────────────
 # Mode AUTO : calcule les X derniers jours disponibles en base
 AUTO_MODE        = True
-AUTO_DAYS_RANGE  = 3
+AUTO_DAYS_RANGE  = 6
 
 # Mode MANUEL : pour forcer une plage spécifique (mettre AUTO_MODE = False)
 MANUAL_END_DATE   = "2026-03-10"   # Format AAAA-MM-JJ
