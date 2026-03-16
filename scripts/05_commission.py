@@ -73,14 +73,14 @@ def fetch_data(engine, view_name, val_col, comm_col, date_start, date_end):
     with engine.connect() as conn:
         return pd.read_sql(sql, conn, params={"ds": date_start, "de": date_end})
 
-def pivot_data(df, qty_label="Add"):
+def pivot_data(df, qty_label="Add", is_ma=False):
     if df.empty:
         return pd.DataFrame()
-    
+
     records = []
     group_cols = ['user_name', 'nom_prenom_superviseur', 'agent_name', 'msisdn_momo', 'real_channel']
     grouped = df.groupby(group_cols, dropna=False)
-    
+
     for name, group in grouped:
         r = {
             'USER NAME': name[0],
@@ -91,7 +91,7 @@ def pivot_data(df, qty_label="Add"):
             f'TOTAL {qty_label}': group['nb_total'].sum(),
             'TOTAL A PAYER': group['amt_total'].sum()
         }
-        
+
         for p in ['Semaine', 'Weekend', 'Dimanche']:
             s_group = group[group['periode_nom'] == p]
             if not s_group.empty:
@@ -100,7 +100,14 @@ def pivot_data(df, qty_label="Add"):
             else:
                 r[f'{qty_label} {p}'] = 0
                 r[f'Mnt {p}'] = 0
-                
+
+        # Dissocier le Cashback pour les MA (100 FCFA par GADD les Weekends et Dimanches)
+        if is_ma and qty_label == "Add":
+            cashback = (r.get(f'{qty_label} Weekend', 0) * 100) + (r.get(f'{qty_label} Dimanche', 0) * 100)
+            r['CASHBACK'] = cashback
+            r['Mnt Weekend'] -= (r.get(f'{qty_label} Weekend', 0) * 100)
+            r['Mnt Dimanche'] -= (r.get(f'{qty_label} Dimanche', 0) * 100)
+
         records.append(r)
         
     res_df = pd.DataFrame(records)
@@ -111,13 +118,16 @@ def pivot_data(df, qty_label="Add"):
         f'{qty_label} Weekend', 'Mnt Weekend',
         f'{qty_label} Dimanche', 'Mnt Dimanche'
     ]
+    if is_ma and qty_label == "Add":
+        cols.insert(7, 'CASHBACK') # Placer cashback juste après TOTAL A PAYER
+
     for col in cols:
         if col not in res_df.columns:
             res_df[col] = 0
             
     return res_df[cols].sort_values(by='TOTAL A PAYER', ascending=False)
 
-def build_tariff_grid(df_raw):
+def build_tariff_grid(df_raw, is_ma=False):
     if df_raw.empty: return []
     grid = []
     # We only need one row of tariffs for the file type, removing 'Canal'
@@ -125,11 +135,15 @@ def build_tariff_grid(df_raw):
     for p in ['Semaine', 'Weekend', 'Dimanche']:
         p_data = df_raw[df_raw['periode_nom'] == p]
         if not p_data.empty:
-            row[p] = int(p_data['pu'].max())
+            val = int(p_data['pu'].max())
+            # On retire le cashback du tarif affiché pour les MA
+            if is_ma and p in ['Weekend', 'Dimanche'] and val >= 100:
+                val -= 100
+            row[p] = val
     grid.append(row)
     return grid
 
-def write_sheet(wb, sheet_name, df_pivot, df_raw, date_start, date_end, data_type="GADD"):
+def write_sheet(wb, sheet_name, df_pivot, df_raw, date_start, date_end, data_type="GADD", is_ma=False):
     ws = wb.create_sheet(sheet_name)
     if df_pivot.empty:
         ws.cell(1, 1, f"Pas de données pour {data_type}")
@@ -149,7 +163,7 @@ def write_sheet(wb, sheet_name, df_pivot, df_raw, date_start, date_end, data_typ
         cell.alignment = Alignment(horizontal="center")
         
     row_idx = 5
-    for item in build_tariff_grid(df_raw):
+    for item in build_tariff_grid(df_raw, is_ma=is_ma):
         for c, key in enumerate(["Semaine", "Weekend", "Dimanche"], 1):
             cell = ws.cell(row_idx, c, item[key])
             cell.border = THIN_BORDER
@@ -170,7 +184,7 @@ def write_sheet(wb, sheet_name, df_pivot, df_raw, date_start, date_end, data_typ
         cell.border = THIN_BORDER
         
     # Identification des types de colonnes
-    currency_cols = [h for h in headers if h.startswith("Mnt") or h == "TOTAL A PAYER"]
+    currency_cols = [h for h in headers if h.startswith("Mnt") or h in ["TOTAL A PAYER", "CASHBACK"]]
     cur_indices = [headers.index(x)+1 for x in currency_cols]
     
     qty_cols = [h for h in headers if h.startswith("Add") or h.startswith("ADS") or h.startswith("TOTAL Add") or h.startswith("TOTAL ADS")]
@@ -315,15 +329,17 @@ def main():
             print("     (Aucune donnée pour ce groupe, on passe)")
             continue
 
-        df_gadd = pivot_data(df_g_grp, qty_label="Add")
-        df_ads  = pivot_data(df_a_grp, qty_label="ADS")
+        is_ma = (group_name == "MA Acquisition")
+
+        df_gadd = pivot_data(df_g_grp, qty_label="Add", is_ma=is_ma)
+        df_ads  = pivot_data(df_a_grp, qty_label="ADS", is_ma=is_ma)
 
         wb = Workbook()
         if wb.active is not None:
             wb.remove(wb.active)
 
-        write_sheet(wb, "New Add (GADD)", df_gadd, df_g_grp, date_start, date_end, f"Variables {group_name} - New Add")
-        write_sheet(wb, "New UserData (ADS)", df_ads, df_a_grp, date_start, date_end, f"Variables {group_name} - New UserData")
+        write_sheet(wb, "New Add (GADD)", df_gadd, df_g_grp, date_start, date_end, f"Variables {group_name} - New Add", is_ma=is_ma)
+        write_sheet(wb, "New UserData (ADS)", df_ads, df_a_grp, date_start, date_end, f"Variables {group_name} - New UserData", is_ma=is_ma)
 
         out_name = f"Variables {group_name} {date_start.strftime('%d-%m-%Y')} - {date_end.strftime('%d-%m-%Y')}.xlsx"
         out_path = OUTPUTS / out_name
