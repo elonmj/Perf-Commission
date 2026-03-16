@@ -96,20 +96,32 @@ def notify_failure(step_name: str, error_detail: str = ""):
         f"Verifiez les logs sur le serveur."
     )
 
-    # Tentative d'envoi email
-    if GMAIL_USER and GMAIL_APP_PASSWORD and ADMIN_EMAIL:
+    # Tentative d'envoi email d'alerte via l'API Gmail OAuth 2.0
+    if ADMIN_EMAIL:
         try:
-            msg = MIMEText(body, "plain", "utf-8")
+            import base64
+            from email.mime.multipart import MIMEMultipart
+            from google.oauth2.credentials import Credentials
+            from googleapiclient.discovery import build
+
+            msg = MIMEMultipart()
             msg["Subject"] = subject
-            msg["From"] = GMAIL_USER
+            msg["From"] = GMAIL_USER or "me"
             msg["To"] = ADMIN_EMAIL
-            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as srv:
-                srv.login(GMAIL_USER, GMAIL_APP_PASSWORD)
-                srv.send_message(msg)
-            print(f"  Alerte email envoyee a {ADMIN_EMAIL}")
-            return
+            msg.attach(MIMEText(body, "plain", "utf-8"))
+
+            token_path = ROOT / "connections" / "token.json"
+            if token_path.exists():
+                creds = Credentials.from_authorized_user_file(str(token_path))
+                service = build("gmail", "v1", credentials=creds)
+                raw_message = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+                service.users().messages().send(userId="me", body={"raw": raw_message}).execute()
+                print(f"  Alerte email envoyee a {ADMIN_EMAIL} via l'API Gmail")
+                return
+            else:
+                print("  Echec envoi email : token.json introuvable.")
         except Exception as exc:
-            print(f"  Echec envoi email : {exc}")
+            print(f"  Echec envoi email via API : {exc}")
 
     # Fallback : notification desktop (Windows seulement)
     try:
