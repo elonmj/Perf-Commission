@@ -13,6 +13,7 @@ Usage :
 import sys
 import base64
 import argparse
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -29,9 +30,24 @@ from connections.config import EMAIL_SUBJECT_PATTERN
 INPUTS = ROOT / "inputs"
 CREDS_FILE = ROOT / "connections" / "credentials.json"
 TOKEN_FILE = ROOT / "connections" / "token.json"
+PROCESSED_IDS_FILE = ROOT / "data" / "processed_mail_ids.json"
 
-# Lecture + modification (pour marquer comme lu)
+# Lecture (scopes)
 SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
+
+def load_processed_ids() -> set:
+    if not PROCESSED_IDS_FILE.exists():
+        return set()
+    try:
+        return set(json.loads(PROCESSED_IDS_FILE.read_text(encoding="utf-8")))
+    except:
+        return set()
+
+def save_processed_id(msg_id: str):
+    PROCESSED_IDS_FILE.parent.mkdir(exist_ok=True)
+    ids = load_processed_ids()
+    ids.add(msg_id)
+    PROCESSED_IDS_FILE.write_text(json.dumps(list(ids)), encoding="utf-8")
 
 
 def notify_desktop(title: str, message: str):
@@ -94,23 +110,29 @@ def fetch_attachment(target_date: datetime = None) -> Path | None:
     print("  Authentification API Gmail réussie.")
 
     # Accepte les deux syntaxes dans l'objet de l'email
-    query = f'(subject:"PERFORMANCE GLOBALE" OR subject:"GLOBALE PERFORMANCE") is:unread'
+    query = f'(subject:"PERFORMANCE GLOBALE" OR subject:"GLOBALE PERFORMANCE")'
     print(f"  Recherche : [{query}]")
 
     results = (
-        service.users().messages().list(userId="me", q=query).execute()
+        service.users().messages().list(userId="me", q=query, maxResults=20).execute()
     )
     messages = results.get("messages", [])
 
     if not messages:
-        print("  Aucun mail non-lu trouvé avec ce sujet.")
+        print("  Aucun mail trouvé avec ce sujet.")
         return None
 
     print(f"  {len(messages)} mail(s) trouvé(s).")
+    
+    processed_ids = load_processed_ids()
     downloaded = None
 
     for msg in messages:
         msg_id = msg["id"]
+        
+        if msg_id in processed_ids:
+            continue
+            
         message = (
             service.users().messages().get(userId="me", id=msg_id).execute()
         )
@@ -142,13 +164,9 @@ def fetch_attachment(target_date: datetime = None) -> Path | None:
             dest.write_bytes(file_data)
             print(f"  Fichier sauvegardé : {dest.name}")
 
-            # Marquer comme lu
-            service.users().messages().modify(
-                userId="me",
-                id=msg_id,
-                body={"removeLabelIds": ["UNREAD"]},
-            ).execute()
-            print("  Mail marqué comme lu.")
+            # Enregistrer l'ID comme traité (au lieu de le marquer comme lu)
+            save_processed_id(msg_id)
+            print("  [Historique] Mail marqué comme traité.")
 
             downloaded = dest
             break
