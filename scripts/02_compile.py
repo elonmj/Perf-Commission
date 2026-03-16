@@ -129,7 +129,13 @@ def merge_wide(existing: pd.DataFrame, new_data: pd.DataFrame) -> pd.DataFrame:
             # Écraser avec la nouvelle valeur si elle existe
             mask = merged[new_col].notna()
             if col in merged.columns:
-                merged.loc[mask, col] = merged.loc[mask, new_col]
+                # pandas StringDtype issue: cast to matching types before insertion
+                try:
+                    merged.loc[mask, col] = merged.loc[mask, new_col]
+                except TypeError:
+                    # Fallback to object type if string dtype is strict and fails with float/NaN masking
+                    merged[col] = merged[col].astype('object')
+                    merged.loc[mask, col] = merged.loc[mask, new_col]
             else:
                 merged[col] = merged[new_col]
             merged.drop(columns=[new_col], inplace=True)
