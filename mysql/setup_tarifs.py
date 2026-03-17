@@ -34,22 +34,28 @@ def setup_tarifs():
             conn.execute(text("""
             INSERT INTO commission_tarifs (type_agent, promotion, date_debut, date_fin, jour_debut, jour_fin, taux_gadd, taux_ads, periode_nom) VALUES
             -- BA (Classiques & Agence)
-            ('BA', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 2, 7, 200, 100, 'Semaine'),
-            ('BA_AGENCE', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 2, 7, 200, 100, 'Semaine'),
+            ('BA', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 2, 5, 200, 100, 'Semaine'),
+            ('BA', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 6, 7, 200, 100, 'Weekend'),
             ('BA', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 1, 1, 300, 100, 'Dimanche'),
+
+            ('BA_AGENCE', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 2, 5, 200, 100, 'Semaine'),
+            ('BA_AGENCE', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 6, 7, 200, 100, 'Weekend'),
             ('BA_AGENCE', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 1, 1, 300, 100, 'Dimanche'),
 
             -- Animation
-            ('Animation Pick-up', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 2, 7, 200, 100, 'Semaine'),
-            ('Animation POS', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 2, 7, 200, 100, 'Semaine'),
+            ('Animation Pick-up', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 2, 5, 200, 100, 'Semaine'),
+            ('Animation Pick-up', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 6, 7, 200, 100, 'Weekend'),
             ('Animation Pick-up', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 1, 1, 300, 100, 'Dimanche'),
+
+            ('Animation POS', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 2, 5, 200, 100, 'Semaine'),
+            ('Animation POS', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 6, 7, 200, 100, 'Weekend'),
             ('Animation POS', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 1, 1, 300, 100, 'Dimanche'),
 
-            -- Master Agents (MA)   week-end = Vendredi et Samedi (200 + 100 cashback) = 300, Dimanche = 300
+            -- Master Agents (MA)   week-end = Vendredi et Samedi (200 + 100 cashback) = 300, Dimanche = (300 + 100 cashback) = 400
             -- Note: New User data = 100 (Ads) sauf MA qui ne s'en occupe pas (taux_ads=0)
             ('MA', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 2, 5, 100, 0, 'Semaine'),
             ('MA', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 6, 7, 300, 0, 'Weekend'),
-            ('MA', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 1, 1, 300, 0, 'Dimanche');
+            ('MA', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 1, 1, 400, 0, 'Dimanche');
             """))
 
             print("3. Creation de la vue vw_commission_gadd...")

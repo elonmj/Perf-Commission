@@ -140,6 +140,10 @@ def build_tariff_grid(df_raw, is_ma=False):
             if is_ma and p in ['Weekend', 'Dimanche'] and val >= 100:
                 val -= 100
             row[p] = val
+            
+    if is_ma:
+        row['Cashback'] = 100
+        
     grid.append(row)
     return grid
 
@@ -148,32 +152,38 @@ def write_sheet(wb, sheet_name, df_pivot, df_raw, date_start, date_end, data_typ
     if df_pivot.empty:
         ws.cell(1, 1, f"Pas de données pour {data_type}")
         return
+
+    # 1. EN-TÊTE : Titre compact (Tarifs et Période)
+    tarifs_title = f"Tarifs (Du {format_date_fr(date_start)} au {format_date_fr(date_end)})"
+    ws.cell(1, 1, tarifs_title).font = Font(bold=True, underline="single", color="2F5496")
+
+    # 2. MINI-TABLEAU TARIFAIRE
+    tariff_headers = ["PU Semaine", "PU Weekend", "PU Dimanche"]
+    tariff_keys = ["Semaine", "Weekend", "Dimanche"]
     
-    # 1. EN-TÊTE : Titre et Période
-    title = f"Commissions {data_type} | Du {format_date_fr(date_start)} au {format_date_fr(date_end)}"
-    ws.cell(1, 1, title).font = Font(bold=True, size=14, color="2F5496")
-    
-    # 2. MINI-TABLEAU TARIFAIRE (Gelé en haut)
-    ws.cell(3, 1, "RAPPEL DES TARIFS (PU Appliqué)").font = Font(bold=True, underline="single", color="2F5496")
-    for c, h in enumerate(["PU Semaine", "PU Weekend", "PU Dimanche"], 1):
-        cell = ws.cell(4, c, h)
+    if is_ma:
+        tariff_headers.append("PU Cashback (Ven, Sam, Dim)")
+        tariff_keys.append("Cashback")
+
+    for c, h in enumerate(tariff_headers, 1):
+        cell = ws.cell(2, c, h)
         cell.font = SUB_HEADER_FONT
         cell.fill = SUB_HEADER_FILL
         cell.border = THIN_BORDER
         cell.alignment = Alignment(horizontal="center")
-        
-    row_idx = 5
+
+    row_idx = 3
     for item in build_tariff_grid(df_raw, is_ma=is_ma):
-        for c, key in enumerate(["Semaine", "Weekend", "Dimanche"], 1):
-            cell = ws.cell(row_idx, c, item[key])
+        for c, key in enumerate(tariff_keys, 1):
+            cell = ws.cell(row_idx, c, item.get(key, 0))
             cell.border = THIN_BORDER
             cell.number_format = CURRENCY_FMT
         row_idx += 1
-        
+
     # Espace
     row_idx += 1
     start_data_row = row_idx
-    
+
     # 3. EN-TÊTES DU TABLEAU DE DONNÉES
     headers = list(df_pivot.columns)
     for c, h in enumerate(headers, 1):
@@ -182,7 +192,7 @@ def write_sheet(wb, sheet_name, df_pivot, df_raw, date_start, date_end, data_typ
         cell.fill = HEADER_FILL
         cell.alignment = HEADER_ALIGN
         cell.border = THIN_BORDER
-        
+
     # Identification des types de colonnes
     currency_cols = [h for h in headers if h.startswith("Mnt") or h in ["TOTAL A PAYER", "CASHBACK"]]
     cur_indices = [headers.index(x)+1 for x in currency_cols]
@@ -231,8 +241,8 @@ def write_sheet(wb, sheet_name, df_pivot, df_raw, date_start, date_end, data_typ
     auto_width(ws)
     
     # 6. GEL DES VOLETS (FREEZE PANES) - LA TOUCHE MAGIQUE EXPERIENCIE CLIENT !
-    # On fige les entêtes de colonnes ET la 1ère colonne (Agent)
-    ws.freeze_panes = ws.cell(start_data_row + 1, 2)
+    # On fige les colonnes identifiantes, sans figer les lignes du haut selon la demande
+    ws.freeze_panes = "D1"
 
 def resolve_date_range(engine, args):
     """Determine la plage de dates selon : args CLI > config.py > extractions outputs."""
