@@ -133,12 +133,19 @@ def fetch_attachment(target_date: datetime = None) -> Path | None:
         if msg_id in processed_ids:
             continue
             
+        def get_all_parts(payload):
+            parts = [payload]
+            if "parts" in payload:
+                for p in payload["parts"]:
+                    parts.extend(get_all_parts(p))
+            return parts
+
         message = (
             service.users().messages().get(userId="me", id=msg_id).execute()
         )
 
-        parts = message.get("payload", {}).get("parts", [])
-        for part in parts:
+        all_parts = get_all_parts(message.get("payload", {}))
+        for part in all_parts:
             filename = part.get("filename")
             if not filename or not filename.lower().endswith(".xlsx"):
                 continue
