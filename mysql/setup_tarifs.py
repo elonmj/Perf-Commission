@@ -34,13 +34,13 @@ def setup_tarifs():
             conn.execute(text("""
             INSERT INTO commission_tarifs (type_agent, promotion, date_debut, date_fin, jour_debut, jour_fin, taux_gadd, taux_ads, periode_nom) VALUES
             -- BA (Classiques & Agence)
-            ('BA', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 2, 5, 200, 100, 'Semaine'),
-            ('BA', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 6, 7, 200, 100, 'Weekend'),
-            ('BA', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 1, 1, 300, 100, 'Dimanche'),
+            ('BA', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 2, 5, 100, 100, 'Semaine'),
+            ('BA', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 6, 7, 300, 100, 'Weekend'),
+            ('BA', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 1, 1, 400, 100, 'Dimanche'),
 
-            ('BA_AGENCE', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 2, 5, 200, 100, 'Semaine'),
-            ('BA_AGENCE', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 6, 7, 200, 100, 'Weekend'),
-            ('BA_AGENCE', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 1, 1, 300, 100, 'Dimanche'),
+            ('BA_AGENCE', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 2, 5, 100, 100, 'Semaine'),
+            ('BA_AGENCE', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 6, 7, 300, 100, 'Weekend'),
+            ('BA_AGENCE', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 1, 1, 400, 100, 'Dimanche'),
 
             -- Animation
             ('Animation Pick-up', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 2, 5, 200, 100, 'Semaine'),

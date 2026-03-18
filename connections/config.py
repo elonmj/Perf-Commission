@@ -57,14 +57,12 @@ SMTP_PORT         = 465
 
 # ─── PARAMÈTRES MAIL ─────────────────────────────────────────────────────────
 EMAIL_SUBJECT_PATTERN   = "PERFORMANCE GLOBALE"
-COMMISSION_RECIPIENT    = "g.fondzefe@lkaservices.com"
+COMMISSION_RECIPIENT    = "joselonm@gmail.com"
 COMMISSION_SUBJECT_TPL  = "Commission LKA — {date}"
 
-# ─── FICHIER D'ERREURS SYNC ──────────────────────────────────────────────────
-SYNC_ERRORS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                "outputs", "sync_errors.json")
-
-# ─── FICHIER GLOBALE PERFORMANCE — STRUCTURE ─────────────────────────────────
+RECIPIENTS_MONTHLY_FINANCIAL  = os.environ.get("RECIPIENTS_MONTHLY_FINANCIAL", "joselonm@gmail.com")
+RECIPIENTS_WEEKLY_BA_ACTIVITY = os.environ.get("RECIPIENTS_WEEKLY_BA_ACTIVITY", "joselonm@gmail.com")
+RECIPIENTS_WEEKLY_SUP_KPI     = os.environ.get("RECIPIENTS_WEEKLY_SUP_KPI", "joselonm@gmail.com")
 PERF_SHEET_NAME        = "WEEKLYGLOBAL"
 PERF_HEADER_ROW        = 5          # row 5 (1-indexed) = column headers
 PERF_DATE_ROW          = 4          # row 4 = merged date headers
