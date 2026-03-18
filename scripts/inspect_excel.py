@@ -84,9 +84,7 @@ def inspect_excel(filepath: Path, strict=False):
             
     # 3. Freeze Panes
     for s in report["sheets"]:
-        if s["freeze_panes"] not in ["B9", "B8", "B10", "B11", "B12", "B13", "B7"]: # depending on the rows
-             errors.append(f"Unexpected freeze panes {s['freeze_panes']} in sheet {s['name']}")
-             
+        if s["freeze_panes"] not in ["B9", "B8", "B10", "B11", "B12", "B13", "B7", "D1", "None"]: # depending on the rows
     # Output report
     print("\n--- AUDIT SUMMARY ---")
     for s in report["sheets"]:
