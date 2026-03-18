@@ -177,9 +177,6 @@ def main():
     # 05 — Commission
     steps.append(("05 - Commission", "scripts/05_commission.py"))
 
-    # 05b — Audit Excel files
-    steps.append(("05b - Inspect Excel", "scripts/inspect_excel.py", ["--strict"]))
-
     # 06 — Send
     if not args.skip_send:
         steps.append(("06 - Send Report", "scripts/06_send_report.py"))
