@@ -31,8 +31,9 @@ LOG_FILE="logs/pipeline_$(date +%Y-%m).log"
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] === Lancement pipeline ===" >> "$LOG_FILE"
 
-python3 run_daily.py >> "$LOG_FILE" 2>&1
-EXIT_CODE=$?
+# Capture le code de sortie sans faire planter le script à cause de 'set -e'
+EXIT_CODE=0
+python3 run_daily.py >> "$LOG_FILE" 2>&1 || EXIT_CODE=$?
 
 if [ $EXIT_CODE -ne 0 ]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] ECHEC (exit $EXIT_CODE)" >> "$LOG_FILE"
