@@ -12,7 +12,8 @@
 #   4. Supprime les logs > 60 jours
 # ============================================================================
 
-set -euo pipefail
+# Retire le -u pour eviter les crash a cause du venv virtuel sous cron
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"

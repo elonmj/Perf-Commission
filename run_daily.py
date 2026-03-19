@@ -52,8 +52,8 @@ def mark_done():
     FLAG_PATH.write_text(str(date.today()))
 
 
-def run_step(name: str, script: str, extra_args: list | None = None) -> tuple[bool, str]:   
-    """Execute un script Python et retourne (succes, traceback_si_echec)."""
+def run_step(name: str, script: str, extra_args: list | None = None) -> tuple[bool, str, int]:
+    """Execute un script Python et retourne (succes, traceback_si_echec, code_retour)."""
     start_time = time.time()
 
     cmd = [sys.executable, str(ROOT / script)]
@@ -79,12 +79,12 @@ def run_step(name: str, script: str, extra_args: list | None = None) -> tuple[bo
     print(f"\n  ⏱️ Temps d'exécution : {elapsed:.2f} secondes")
 
     if result.returncode != 0:
-        print(f"\n  ERREUR : {name} a echoue (exit code {result.returncode})")  
+        print(f"\n  ERREUR : {name} a echoue (exit code {result.returncode})")
         error_log = result.stderr if result.stderr.strip() else result.stdout
-        return False, error_log
+        return False, error_log, result.returncode
 
     print(f"\n  OK : {name} termine avec succes.")
-    return True, ""
+    return True, "", 0
 
 
 def notify_failure(step_name: str, error_detail: str = ""):
@@ -125,7 +125,8 @@ def notify_failure(step_name: str, error_detail: str = ""):
 
     # Fallback : notification desktop (Windows seulement)
     try:
-        from plyer import notification
+        import importlib
+        notification = importlib.import_module("plyer.notification")
         notification.notify(
             title=subject,
             message=f"L'etape '{step_name}' a echoue. Verifiez les logs.",
@@ -181,9 +182,11 @@ def main():
     if not args.skip_send:
         steps.append(("06 - Send Report", "scripts/06_send_report.py"))
 
-    # 07 - Weekly Summary (S'auto-régule, aucun envoi si semaine non complète)
+    # 07, 08, 09 - Rapports Périodiques (auto-régulés, aucun envoi si déjà fait)
     if not args.skip_send:
-        steps.append(("07 - Weekly Summary", "scripts/07_weekly_summary.py"))
+        steps.append(("07 - Weekly BA Activity", "scripts/07_weekly_ba_activity.py"))
+        steps.append(("08 - Weekly Sup KPI", "scripts/08_weekly_sup_kpi.py"))
+        steps.append(("09 - Monthly Financial", "scripts/09_monthly_financial.py"))
 
     # Execution sequentielle
     for step in steps:
@@ -191,7 +194,10 @@ def main():
         script = step[1]
         extra = step[2] if len(step) > 2 else None
 
-        ok, err_log = run_step(name, script, extra)
+        ok, err_log, code = run_step(name, script, extra)
+        if name == "00 - Fetch Mail" and code == 2:
+            print("\n  Aucun nouveau mail PERFORMANCE GLOBALE. Pipeline arrêté sans erreur.")
+            sys.exit(0)
         if not ok:
             # Tronque très grand log d'erreur avant de l'envoyer dans l'email
             err_body = err_log[-3500:] if len(err_log) > 3500 else err_log

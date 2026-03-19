@@ -53,7 +53,8 @@ def save_processed_id(msg_id: str):
 def notify_desktop(title: str, message: str):
     """Notification desktop (Windows toast via plyer)."""
     try:
-        from plyer import notification
+        import importlib
+        notification = importlib.import_module("plyer.notification")
         notification.notify(title=title, message=message, timeout=10)
     except ImportError:
         print(f"  [NOTIF] {title} — {message}")
@@ -91,7 +92,7 @@ def get_gmail_service():
     return build("gmail", "v1", credentials=creds)
 
 
-def fetch_attachment(target_date: datetime = None) -> Path | None:
+def fetch_attachment(target_date: datetime | None = None) -> Path | None:
     """
     Cherche le mail PERFORMANCE GLOBALE non-lu via l'API Gmail
     et télécharge la pièce jointe .xlsx dans inputs/.
@@ -207,7 +208,7 @@ def main():
         )
         print(f"\n  {msg}")
         notify_desktop("Perf_commissions", msg)
-        sys.exit(1)
+        sys.exit(2)
 
 
 if __name__ == "__main__":

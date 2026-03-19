@@ -57,12 +57,12 @@ SMTP_PORT         = 465
 
 # ─── PARAMÈTRES MAIL ─────────────────────────────────────────────────────────
 EMAIL_SUBJECT_PATTERN   = "PERFORMANCE GLOBALE"
-COMMISSION_RECIPIENT    = "joselonm@gmail.com"
+COMMISSION_RECIPIENT    = "g.fondzefe@lkaservices.com"
 COMMISSION_SUBJECT_TPL  = "Commission LKA — {date}"
 
-RECIPIENTS_MONTHLY_FINANCIAL  = os.environ.get("RECIPIENTS_MONTHLY_FINANCIAL", "joselonm@gmail.com")
-RECIPIENTS_WEEKLY_BA_ACTIVITY = os.environ.get("RECIPIENTS_WEEKLY_BA_ACTIVITY", "joselonm@gmail.com")
-RECIPIENTS_WEEKLY_SUP_KPI     = os.environ.get("RECIPIENTS_WEEKLY_SUP_KPI", "joselonm@gmail.com")
+RECIPIENTS_MONTHLY_FINANCIAL  = os.environ.get("RECIPIENTS_MONTHLY_FINANCIAL", "g.fondzefe@lkaservices.com")
+RECIPIENTS_WEEKLY_BA_ACTIVITY = os.environ.get("RECIPIENTS_WEEKLY_BA_ACTIVITY", "g.fondzefe@lkaservices.com")
+RECIPIENTS_WEEKLY_SUP_KPI     = os.environ.get("RECIPIENTS_WEEKLY_SUP_KPI", "g.fondzefe@lkaservices.com")
 PERF_SHEET_NAME        = "WEEKLYGLOBAL"
 PERF_HEADER_ROW        = 5          # row 5 (1-indexed) = column headers
 PERF_DATE_ROW          = 4          # row 4 = merged date headers
@@ -107,6 +107,9 @@ FLAG_FILE         = "last_success.txt"
 
 # ─── ALERTES ADMIN (pour notify_failure sur serveur) ────────────────────────
 ADMIN_EMAIL = os.environ.get("PERF_ADMIN_EMAIL", "joselonm@gmail.com")
+
+# ─── FICHIER D'ERREURS SYNC ──────────────────────────────────────────────────
+SYNC_ERRORS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "outputs", "sync_errors.json")
 
 # ─── CONFIGURATION BI (Génération des Commissions) ─────────────────────────
 # Mode AUTO : calcule les X derniers jours disponibles en base
