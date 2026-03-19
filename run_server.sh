@@ -19,6 +19,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # ─── 1. Mise a jour du code ─────────────────────────────────────────────────
+# Force le reset si des fichiers locaux ont ete modifies par erreur
+git fetch origin main --quiet 2>/dev/null || true
+git reset --hard origin/main --quiet 2>/dev/null || true
 git pull origin main --quiet 2>/dev/null || true
 
 # ─── 2. Activer le venv ─────────────────────────────────────────────────────
