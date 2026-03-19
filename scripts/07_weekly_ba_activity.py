@@ -4,7 +4,7 @@ import json
 import base64
 import mimetypes
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date as date_cls
 
 import pandas as pd
 from sqlalchemy import text
@@ -115,17 +115,20 @@ def generate_ba_actif_weekly(engine, start_week, end_week):
     
     pivot_df = df.pivot_table(index=idx_cols, columns='perf_date', values='gadd', aggfunc='sum')
     pivot_df = pivot_df.reset_index()
-    pivot_df = pivot_df.loc[:, pivot_df.columns.notnull()]
+    pivot_df.columns = [c.strftime('%Y-%m-%d') if isinstance(c, (pd.Timestamp, date_cls)) else c for c in pivot_df.columns]
         
     date_range = pd.date_range(start=start_of_month, end=end_week)
     for dt in date_range:
-        if dt.date() not in pivot_df.columns:
-            pivot_df[dt.date()] = 0
+        date_col = dt.date().strftime('%Y-%m-%d')
+        if date_col not in pivot_df.columns:
+            pivot_df[date_col] = 0
             
-    date_cols = [c for c in pivot_df.columns if type(c) == type(start_of_month) or isinstance(c, datetime)]
+    date_cols = [c for c in list(pivot_df.columns) if isinstance(c, str) and len(c) == 10 and c[4] == '-' and c[7] == '-']
     date_cols_sorted = sorted(date_cols)
 
     pivot_df = pivot_df[idx_cols + date_cols_sorted].fillna(0).copy()
+    for col in date_cols_sorted:
+        pivot_df[col] = pd.to_numeric(pivot_df[col], errors='coerce').fillna(0)
     
     month_dates = [c for c in date_cols_sorted]
     last_week_dates = [c for c in date_cols_sorted if pd.to_datetime(c).date() >= start_week and pd.to_datetime(c).date() <= end_week]
@@ -150,8 +153,8 @@ def generate_ba_actif_weekly(engine, start_week, end_week):
     recap['PCT Actif la semaine dernier'] = recap['Nb Actif La semaine denier'] / recap['Nb des BA']
     
     # Sort regions/superviseurs by best performance (descending)
-    recap = recap.sort_values(by='PCT Actif le mois', ascending=False)
-    # Sort pivot exactly by region and supervisor, but we keep it simple for now
+    recap = recap.sort_values(by=['REGION', 'Description'], ascending=[True, True])
+    # Keep the detailed sheet grouped by region then supervisor for easier reading
     pivot_df = pivot_df.sort_values(by=['REGION', 'Superviseur'])
 
     output_dir = os.path.join(ROOT, "outputs")
@@ -187,7 +190,7 @@ def main():
     week_id = f"{start_date.strftime('%Y-%m-%d')}_to_{end_date.strftime('%Y-%m-%d')}"
     
     processed_weeks = load_processed_weeks()
-    if week_id in processed_weeks:
+    if week_id in processed_weeks and os.environ.get("FORCE_SEND_ALL") != "1":
         print(f"  Semaine {week_id} déjà traitée (BA Actif).")
         sys.exit(0)
 

@@ -138,15 +138,19 @@ def notify_failure(step_name: str, error_detail: str = ""):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--force", action="store_true",
-                        help="Ignorer le flag et forcer l'execution")
-    parser.add_argument("--skip-fetch", action="store_true",
-                        help="Sauter le fetch mail (pour tests)")
-    parser.add_argument("--skip-send", action="store_true",
-                        help="Sauter l'envoi email")
-    parser.add_argument("--initial", action="store_true",
-                        help="Premier chargement (utilise 03 au lieu de 04)")
+    parser.add_argument("--force", action="store_true", help="Ignorer le flag et forcer l'execution")
+    parser.add_argument("--skip-fetch", action="store_true", help="Sauter le fetch mail (pour tests)")
+    parser.add_argument("--skip-send", action="store_true", help="Sauter l'envoi email")
+    parser.add_argument("--initial", action="store_true", help="Premier chargement (utilise 03 au lieu de 04)")
+    parser.add_argument("--force-send-all", action="store_true", help="Forcer TOUS les e-mails de reporting à s'envoyer (bypass trackers)")
+    
     args = parser.parse_args()
+
+    if args.force_send_all:
+        import os
+        os.environ["FORCE_SEND_ALL"] = "1"
+        args.skip_fetch = True  # On ne fetch pas
+        args.force = True       # On ignore le last_success
 
     print(f"=== Pipeline Perf Commissions — {datetime.now().strftime('%Y-%m-%d %H:%M')} ===")
     print()
@@ -159,21 +163,22 @@ def main():
 
     steps = []
 
-    # 00 — Fetch mail
-    if not args.skip_fetch:
-        steps.append(("00 - Fetch Mail", "scripts/00_fetch_mail.py"))
+    if not args.force_send_all:
+        # 00 — Fetch mail
+        if not args.skip_fetch:
+            steps.append(("00 - Fetch Mail", "scripts/00_fetch_mail.py"))
 
-    # 01 — Process
-    steps.append(("01 - Process", "scripts/01_process.py"))
+        # 01 — Process
+        steps.append(("01 - Process", "scripts/01_process.py"))
 
-    # 02 — Compile
-    steps.append(("02 - Compile", "scripts/02_compile.py"))
+        # 02 — Compile
+        steps.append(("02 - Compile", "scripts/02_compile.py"))
 
-    # 03 ou 04 — Upload ou Sync
-    if args.initial:
-        steps.append(("03 - Upload Initial", "scripts/03_upload.py", ["--confirm"]))
-    else:
-        steps.append(("04 - Sync", "scripts/04_sync.py"))
+        # 03 ou 04 — Upload ou Sync
+        if args.initial:
+            steps.append(("03 - Upload Initial", "scripts/03_upload.py", ["--confirm"]))
+        else:
+            steps.append(("04 - Sync", "scripts/04_sync.py"))
 
     # 05 — Commission
     steps.append(("05 - Commission", "scripts/05_commission.py"))

@@ -145,7 +145,7 @@ def main():
     week_id = f"{start_date.strftime('%Y-%m-%d')}_to_{end_date.strftime('%Y-%m-%d')}"
     
     processed_weeks = load_processed_weeks()
-    if week_id in processed_weeks:
+    if week_id in processed_weeks and os.environ.get("FORCE_SEND_ALL") != "1":
         print(f"  Semaine {week_id} déjà traitée (Sup KPI).")
         sys.exit(0)
 

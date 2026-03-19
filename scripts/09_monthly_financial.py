@@ -158,7 +158,7 @@ def main():
         sys.exit(0)
 
     processed_months = load_processed_months()
-    if target_month in processed_months:
+    if target_month in processed_months and os.environ.get("FORCE_SEND_ALL") != "1":
         print(f"  Mois {target_month} déjà traité (Financier).")
         sys.exit(0)
 
