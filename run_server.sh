@@ -12,8 +12,8 @@
 #   4. Supprime les logs > 60 jours
 # ============================================================================
 
-# Retire le -u pour eviter les crash a cause du venv virtuel sous cron
-set -eo pipefail
+# Strict mode : -e (exit on error), -u (undefined vars), -o pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -23,7 +23,9 @@ git pull origin main --quiet 2>/dev/null || true
 
 # ─── 2. Activer le venv ─────────────────────────────────────────────────────
 if [ -d "venv" ]; then
+    set +u  # desactive brievement la verification pour activer le venv sans crasher sous cron
     source venv/bin/activate
+    set -u  # reactive la securite stricte
 fi
 
 # ─── 3. Log mensuel ─────────────────────────────────────────────────────────
