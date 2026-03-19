@@ -251,8 +251,8 @@ def write_sheet(wb, sheet_name, df_pivot, date_start, date_end, data_type="GADD"
     auto_width(ws)
     
     # 6. GEL DES VOLETS (FREEZE PANES) - LA TOUCHE MAGIQUE EXPERIENCIE CLIENT !
-    # On fige les colonnes identifiantes, sans figer les lignes du haut selon la demande
-    ws.freeze_panes = "D1"
+    # On fige la première colonne identifiante (USER NAME) et les 5 premières lignes (jusqu'aux en-têtes)
+    ws.freeze_panes = "B6"
 
 def resolve_date_range(engine, args):
     """Determine la plage de dates selon : args CLI > config.py > extractions outputs."""
