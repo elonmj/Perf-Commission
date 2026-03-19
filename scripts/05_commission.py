@@ -127,27 +127,37 @@ def pivot_data(df, qty_label="Add", is_ma=False):
             
     return res_df[cols].sort_values(by='TOTAL A PAYER', ascending=False)
 
-def build_tariff_grid(df_raw, is_ma=False):
-    if df_raw.empty: return []
-    grid = []
-    # We only need one row of tariffs for the file type, removing 'Canal'
+def build_tariff_grid(engine, group_channels, data_type, is_ma=False):
+    table_col = "taux_gadd" if "Add" in data_type else "taux_ads"
+    ch = ", ".join([f"'{c}'" for c in group_channels])
+    
+    sql = text(f"""
+        SELECT periode_nom, MAX({table_col}) as val
+        FROM commission_tarifs
+        WHERE type_agent IN ({ch})
+        GROUP BY periode_nom
+    """)
     row = {'Semaine': 0, 'Weekend': 0, 'Dimanche': 0}
-    for p in ['Semaine', 'Weekend', 'Dimanche']:
-        p_data = df_raw[df_raw['periode_nom'] == p]
-        if not p_data.empty:
-            val = int(p_data['pu'].max())
-            # On retire le cashback du tarif affiché pour les MA
-            if is_ma and p in ['Weekend', 'Dimanche'] and val >= 100:
+    with engine.connect() as conn:
+        res = conn.execute(sql).fetchall()
+        for r in res:
+            p = r[0]
+            val = int(r[1])
+            # Extra Cashback handling specific to MA and Add
+            if is_ma and "Add" in data_type and p in ['Weekend', 'Dimanche'] and val >= 100:
                 val -= 100
-            row[p] = val
-            
-    if is_ma:
-        row['Cashback'] = 100
-        
-    grid.append(row)
-    return grid
+            if p in row:
+                row[p] = val
 
-def write_sheet(wb, sheet_name, df_pivot, df_raw, date_start, date_end, data_type="GADD", is_ma=False):
+    if is_ma and "Add" in data_type:
+        row['Cashback'] = 100
+    elif is_ma and "User" in data_type:
+        # Avoid showing Cashback logic on ADS for MA
+        pass
+        
+    return [row]
+
+def write_sheet(wb, sheet_name, df_pivot, date_start, date_end, data_type="GADD", is_ma=False, engine=None, group_channels=None):
     ws = wb.create_sheet(sheet_name)
     if df_pivot.empty:
         ws.cell(1, 1, f"Pas de données pour {data_type}")
@@ -161,7 +171,7 @@ def write_sheet(wb, sheet_name, df_pivot, df_raw, date_start, date_end, data_typ
     tariff_headers = ["PU Semaine", "PU Weekend", "PU Dimanche"]
     tariff_keys = ["Semaine", "Weekend", "Dimanche"]
     
-    if is_ma:
+    if is_ma and "Add" in data_type:
         tariff_headers.append("PU Cashback (Ven, Sam, Dim)")
         tariff_keys.append("Cashback")
 
@@ -173,7 +183,7 @@ def write_sheet(wb, sheet_name, df_pivot, df_raw, date_start, date_end, data_typ
         cell.alignment = Alignment(horizontal="center")
 
     row_idx = 3
-    for item in build_tariff_grid(df_raw, is_ma=is_ma):
+    for item in build_tariff_grid(engine, group_channels, data_type, is_ma=is_ma):
         for c, key in enumerate(tariff_keys, 1):
             cell = ws.cell(row_idx, c, item.get(key, 0))
             cell.border = THIN_BORDER
@@ -348,8 +358,8 @@ def main():
         if wb.active is not None:
             wb.remove(wb.active)
 
-        write_sheet(wb, "New Add (GADD)", df_gadd, df_g_grp, date_start, date_end, f"Variables {group_name} - New Add", is_ma=is_ma)
-        write_sheet(wb, "New UserData (ADS)", df_ads, df_a_grp, date_start, date_end, f"Variables {group_name} - New UserData", is_ma=is_ma)
+        write_sheet(wb, "New Add (GADD)", df_gadd, date_start, date_end, f"Variables {group_name} - New Add", is_ma=is_ma, engine=engine, group_channels=group_channels)
+        write_sheet(wb, "New UserData (ADS)", df_ads, date_start, date_end, f"Variables {group_name} - New UserData", is_ma=is_ma, engine=engine, group_channels=group_channels)
 
         out_name = f"Variables {group_name} {date_start.strftime('%d-%m-%Y')} - {date_end.strftime('%d-%m-%Y')}.xlsx"
         out_path = OUTPUTS / out_name
