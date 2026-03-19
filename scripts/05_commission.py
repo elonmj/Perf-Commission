@@ -163,11 +163,11 @@ def write_sheet(wb, sheet_name, df_pivot, date_start, date_end, data_type="GADD"
         ws.cell(1, 1, f"Pas de données pour {data_type}")
         return
 
-    # 1. EN-TÊTE : Titre compact (Tarifs et Période)
-    tarifs_title = f"Tarifs (Du {format_date_fr(date_start)} au {format_date_fr(date_end)})"
-    ws.cell(1, 1, tarifs_title).font = Font(bold=True, underline="single", color="2F5496")
+    # 1. EN-TÊTE : Période en colonne 1
+    ws.cell(1, 1, f"Du {format_date_fr(date_start)}").font = Font(bold=True, italic=True)
+    ws.cell(2, 1, f"Au {format_date_fr(date_end)}").font = Font(bold=True, italic=True)
 
-    # 2. MINI-TABLEAU TARIFAIRE
+    # 2. MINI-TABLEAU TARIFAIRE (Commence à la colonne 2)
     tariff_headers = ["PU Semaine", "PU Weekend", "PU Dimanche"]
     tariff_keys = ["Semaine", "Weekend", "Dimanche"]
     
@@ -175,24 +175,21 @@ def write_sheet(wb, sheet_name, df_pivot, date_start, date_end, data_type="GADD"
         tariff_headers.append("PU Cashback (Ven, Sam, Dim)")
         tariff_keys.append("Cashback")
 
-    for c, h in enumerate(tariff_headers, 1):
-        cell = ws.cell(2, c, h)
+    for c, h in enumerate(tariff_headers, 2): # Colonne B (2) et suivantes
+        cell = ws.cell(1, c, h)
         cell.font = SUB_HEADER_FONT
         cell.fill = SUB_HEADER_FILL
         cell.border = THIN_BORDER
         cell.alignment = Alignment(horizontal="center")
 
-    row_idx = 3
     for item in build_tariff_grid(engine, group_channels, data_type, is_ma=is_ma):
-        for c, key in enumerate(tariff_keys, 1):
-            cell = ws.cell(row_idx, c, item.get(key, 0))
+        for c, key in enumerate(tariff_keys, 2):
+            cell = ws.cell(2, c, item.get(key, 0))
             cell.border = THIN_BORDER
             cell.number_format = CURRENCY_FMT
-        row_idx += 1
 
-    # Espace
-    row_idx += 1
-    start_data_row = row_idx
+    # 3. EN-TÊTES DU TABLEAU DE DONNÉES (Ligne 3)
+    start_data_row = 3
 
     # 3. EN-TÊTES DU TABLEAU DE DONNÉES
     headers = list(df_pivot.columns)
@@ -251,9 +248,9 @@ def write_sheet(wb, sheet_name, df_pivot, date_start, date_end, data_type="GADD"
     auto_width(ws)
     
     # 6. GEL DES VOLETS (FREEZE PANES)
-    # Limitation EXCEL : On ne peut pas figer la ligne 5 sans figer simultanément les lignes 1 à 4.
-    # Puisque tu ne veux pas que les tarifs soient figés, on ne fige QUE la colonne A (Username).
-    ws.freeze_panes = "B1"
+    # Ligne 1-2 : Tarifs, Ligne 3 : En-têtes, Colonne A : User Name
+    # Geler au niveau de B4 permet de garder l'en-tête (Ligne 3) statique avec les dates, et le nom figé.
+    ws.freeze_panes = "B4"
 
 def resolve_date_range(engine, args):
     """Determine la plage de dates selon : args CLI > config.py > extractions outputs."""
