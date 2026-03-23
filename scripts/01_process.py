@@ -71,7 +71,14 @@ def parse_perf_file(path: Path):
         df_ads   : DataFrame long (user_name, msisdn_momo, perf_date, ads)
     """
     wb = openpyxl.load_workbook(path, data_only=True)
-    ws = wb[PERF_SHEET_NAME]
+    
+    # Prise en charge dynamique de l'onglet : prendre le premier onglet, peu importe son nom
+    if not wb.sheetnames:
+        raise ValueError(f"Aucun onglet trouvé dans {path}")
+    
+    first_sheet_name = wb.sheetnames[0]
+    ws = wb[first_sheet_name]
+    print(f"  [Info] Lecture de l'onglet : '{first_sheet_name}'")
 
     max_row = ws.max_row
     max_col = ws.max_column
