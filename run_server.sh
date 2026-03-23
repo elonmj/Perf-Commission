@@ -18,11 +18,31 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# ─── 1. Mise a jour du code ─────────────────────────────────────────────────
-# Force le reset si des fichiers locaux ont ete modifies par erreur
-git fetch origin main --quiet 2>/dev/null || true
-git reset --hard origin/main --quiet 2>/dev/null || true
-git pull origin main --quiet 2>/dev/null || true
+# ─── 0. Configuration des logs ────────────────────────────────────────────────
+mkdir -p logs
+LOG_FILE="logs/pipeline_$(date +%Y-%m).log"
+
+# ─── 1. Mise à jour du code avec Retry ──────────────────────────────────────
+MAX_RETRIES=5
+RETRY_COUNT=0
+SUCCESS=false
+
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    if git fetch origin main --quiet; then
+        git reset --hard origin/main --quiet || true
+        git pull origin main --quiet || true
+        SUCCESS=true
+        break
+    else
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Echec connexion GitHub (tentative $RETRY_COUNT/$MAX_RETRIES). Nouvelle tentative dans 10s..." >> "$LOG_FILE"
+        sleep 10
+    fi
+done
+
+if [ "$SUCCESS" = false ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] CRITICAL: Impossible de mettre à jour depuis GitHub après $MAX_RETRIES tentatives. Exécution avec le code local actuel." >> "$LOG_FILE"
+fi
 
 # ─── 2. Activer le venv ─────────────────────────────────────────────────────
 if [ -d "venv" ]; then
@@ -31,10 +51,7 @@ if [ -d "venv" ]; then
     set -u  # reactive la securite stricte
 fi
 
-# ─── 3. Log mensuel ─────────────────────────────────────────────────────────
-mkdir -p logs
-LOG_FILE="logs/pipeline_$(date +%Y-%m).log"
-
+# ─── 3. Lancement du Pipeline ───────────────────────────────────────────────
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] === Lancement pipeline ===" >> "$LOG_FILE"
 
 # Capture le code de sortie sans faire planter le script à cause de 'set -e'
