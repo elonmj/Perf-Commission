@@ -14,6 +14,7 @@ import sys
 import base64
 import argparse
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -114,9 +115,22 @@ def fetch_attachment(target_date: datetime | None = None) -> Path | None:
     query = 'subject:(PERFORMANCE OR PERFORMANCES) subject:(GLOBALE OR GLOBALES)'
     print(f"  Recherche : [{query}]")
 
-    results = (
-        service.users().messages().list(userId="me", q=query, maxResults=20).execute()
-    )
+    # Retry logic pour pallier aux instabilités réseau du serveur
+    max_retries = 3
+    results = {}
+    for attempt in range(1, max_retries + 1):
+        try:
+            results = (
+                service.users().messages().list(userId="me", q=query, maxResults=20).execute()
+            )
+            break
+        except Exception as e:
+            if attempt == max_retries:
+                print(f"  [Erreur Réseau] API Gmail injoignable après {max_retries} tentatives : {e}")
+                sys.exit(1)
+            print(f"  [Réseau] Instabilité avec Google. Nouvelle tentative ({attempt}/{max_retries}) dans 10 secondes...")
+            time.sleep(10)
+
     messages = results.get("messages", [])
 
     if not messages:
