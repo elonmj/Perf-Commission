@@ -110,8 +110,8 @@ def fetch_attachment(target_date: datetime | None = None) -> Path | None:
     service = get_gmail_service()
     print("  Authentification API Gmail réussie.")
 
-    # Accepte les deux syntaxes dans l'objet de l'email
-    query = f'(subject:"PERFORMANCE GLOBALE" OR subject:"GLOBALE PERFORMANCE")'
+    # Recherche ultra-souple : tolère les "S" finaux et la mention "FW:"
+    query = 'subject:(PERFORMANCE OR PERFORMANCES) subject:(GLOBALE OR GLOBALES)'
     print(f"  Recherche : [{query}]")
 
     results = (
