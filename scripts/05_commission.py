@@ -292,20 +292,27 @@ def resolve_date_range(engine, args):
                 if m_new:
                     dates_trouvees.append(datetime.strptime(m_new.group(1), "%d-%m-%Y").date())
                     
+        today = datetime.now().date()
+        
         if dates_trouvees:
             last_comm_date = max(dates_trouvees)
             dyn_start = last_comm_date + timedelta(days=1)
             
             if dyn_start > end:
-                # Si on a déjà généré jusqu'à end, on refait juste le dernier jour par sécurité
-                # ou on laisse start = end
+                # Comportement par défaut (ex: paiement chaque 48h)
+                # De la dernière date du dernier mail traité à la date actuelle
                 start = end
+                end_date = today
             else:
+                # Rattrapage jusqu'à la date actuelle
                 start = dyn_start
+                end_date = today
         else:
-            start = end - timedelta(days=AUTO_DAYS_RANGE - 1)
+            # Fallback global sans historique : de la dernière perf à aujourd'hui
+            start = end
+            end_date = today
 
-        return (start, end)
+        return (start, end_date)
     else:
         end = datetime.strptime(MANUAL_END_DATE, "%Y-%m-%d").date()
         start = end - timedelta(days=MANUAL_RANGE_DAYS - 1)
