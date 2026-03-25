@@ -7,6 +7,7 @@ from pathlib import Path
 from datetime import datetime, timedelta, date as date_cls
 
 import pandas as pd
+import numpy as np
 from sqlalchemy import text
 from email.message import EmailMessage
 from openpyxl import Workbook
@@ -149,8 +150,8 @@ def generate_ba_actif_weekly(engine, start_week, end_week):
         'Nb_Actif_La_semaine_denier': 'Nb Actif La semaine denier'
     }, inplace=True)
                            
-    recap['PCT Actif le mois'] = recap['Nb Actif pour le mois'] / recap['Nb des BA']
-    recap['PCT Actif la semaine dernier'] = recap['Nb Actif La semaine denier'] / recap['Nb des BA']
+    recap['PCT Actif le mois'] = (recap['Nb Actif pour le mois'] / recap['Nb des BA'].replace(0, np.nan)).fillna(0)
+    recap['PCT Actif la semaine dernier'] = (recap['Nb Actif La semaine denier'] / recap['Nb des BA'].replace(0, np.nan)).fillna(0)
     
     # Sort regions/superviseurs by best performance (descending)
     recap = recap.sort_values(by=['REGION', 'Description'], ascending=[True, True])

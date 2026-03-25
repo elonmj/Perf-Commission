@@ -15,14 +15,15 @@ from connections.connect import make_engine
 # Convertit l'ancienne table statique en vue dynamique
 VIEW_SUPERVISEUR_INFO = """
 CREATE OR REPLACE VIEW vw_superviseur_info AS
-SELECT DISTINCT 
+SELECT
     superviseur AS superviseur_name,
     NULL AS msisdn_momo,
     IF(UPPER(superviseur) IN ('ROLAND', 'SAMUEL BOSSOU', 'VINCENT DE PAULE', 'VINCENT DE PAUL'), 'Mercenaire', 'Classiques') AS type_superviseur,
-    NULL AS region,
+    MAX(region) AS region,
     2340 AS target_mensuel
 FROM agent_perf_info
-WHERE superviseur IS NOT NULL AND superviseur != '';
+WHERE superviseur IS NOT NULL AND superviseur != ''
+GROUP BY superviseur;
 """
 
 VIEW_SUPERVISEUR = """
@@ -74,7 +75,7 @@ SELECT
         IF(COALESCE(mad.jours_actifs_15, 0) >= 20, 60000, 0)
     ) AS prime_fixe,
 
-    IF((m.total_new_add / s.target_mensuel) >= 1, 50000, (m.total_new_add / s.target_mensuel) * 50000) AS prime_variable,
+    IF((m.total_new_add / NULLIF(s.target_mensuel, 0)) >= 1, 50000, (m.total_new_add / NULLIF(s.target_mensuel, 0)) * 50000) AS prime_variable,
 
     IF(s.type_superviseur != 'Mercenaire',
         IF(COALESCE(mad.jours_actifs_15, 0) >= 20, 20000, 0),

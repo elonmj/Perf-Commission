@@ -33,29 +33,47 @@ def setup_tarifs():
             # Jours dans MySQL (fonction DAYOFWEEK): 1=Dimanche, 2=Lundi, 3=Mardi, 4=Mercredi, 5=Jeudi, 6=Vendredi, 7=Samedi
             conn.execute(text("""
             INSERT INTO commission_tarifs (type_agent, promotion, date_debut, date_fin, jour_debut, jour_fin, taux_gadd, taux_ads, periode_nom) VALUES
+            -- ANCIENNES REGLES (Jusqu'au 15 Mars 2026 inclus)
             -- BA (Classiques & Agence)
-            ('BA', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 2, 5, 100, 100, 'Semaine'),
-            ('BA', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 6, 7, 300, 100, 'Weekend'),
-            ('BA', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 1, 1, 400, 100, 'Dimanche'),
+            ('BA', 'Campagne Actuelle', '2026-02-27', '2026-03-15', 2, 5, 100, 100, 'Semaine'),
+            ('BA', 'Campagne Actuelle', '2026-02-27', '2026-03-15', 6, 7, 300, 100, 'Weekend'),
+            ('BA', 'Campagne Actuelle', '2026-02-27', '2026-03-15', 1, 1, 400, 100, 'Dimanche'),
 
-            ('BA_AGENCE', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 2, 5, 100, 100, 'Semaine'),
-            ('BA_AGENCE', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 6, 7, 300, 100, 'Weekend'),
-            ('BA_AGENCE', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 1, 1, 400, 100, 'Dimanche'),
+            ('BA_AGENCE', 'Campagne Actuelle', '2026-02-27', '2026-03-15', 2, 5, 100, 100, 'Semaine'),
+            ('BA_AGENCE', 'Campagne Actuelle', '2026-02-27', '2026-03-15', 6, 7, 300, 100, 'Weekend'),
+            ('BA_AGENCE', 'Campagne Actuelle', '2026-02-27', '2026-03-15', 1, 1, 400, 100, 'Dimanche'),
 
             -- Animation
-            ('Animation Pick-up', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 2, 5, 200, 100, 'Semaine'),
-            ('Animation Pick-up', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 6, 7, 200, 100, 'Weekend'),
-            ('Animation Pick-up', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 1, 1, 300, 100, 'Dimanche'),
+            ('Animation Pick-up', 'Campagne Actuelle', '2026-02-27', '2026-03-15', 2, 5, 200, 100, 'Semaine'),
+            ('Animation Pick-up', 'Campagne Actuelle', '2026-02-27', '2026-03-15', 6, 7, 200, 100, 'Weekend'),
+            ('Animation Pick-up', 'Campagne Actuelle', '2026-02-27', '2026-03-15', 1, 1, 300, 100, 'Dimanche'),
 
-            ('Animation POS', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 2, 5, 200, 100, 'Semaine'),
-            ('Animation POS', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 6, 7, 200, 100, 'Weekend'),
-            ('Animation POS', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 1, 1, 300, 100, 'Dimanche'),
+            ('Animation POS', 'Campagne Actuelle', '2026-02-27', '2026-03-15', 2, 5, 200, 100, 'Semaine'),
+            ('Animation POS', 'Campagne Actuelle', '2026-02-27', '2026-03-15', 6, 7, 200, 100, 'Weekend'),
+            ('Animation POS', 'Campagne Actuelle', '2026-02-27', '2026-03-15', 1, 1, 300, 100, 'Dimanche'),
 
             -- Master Agents (MA)   week-end = Vendredi et Samedi (200 + 100 cashback) = 300, Dimanche = (300 + 100 cashback) = 400
             -- Note: New User data = 100 (Ads) sauf MA qui ne s'en occupe pas (taux_ads=0)
-            ('MA', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 2, 5, 100, 0, 'Semaine'),
-            ('MA', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 6, 7, 300, 0, 'Weekend'),
-            ('MA', 'Campagne Actuelle', '2026-02-27', '2099-12-31', 1, 1, 400, 0, 'Dimanche');
+            ('MA', 'Campagne Actuelle', '2026-02-27', '2026-03-15', 2, 5, 100, 0, 'Semaine'),
+            ('MA', 'Campagne Actuelle', '2026-02-27', '2026-03-15', 6, 7, 300, 0, 'Weekend'),
+            ('MA', 'Campagne Actuelle', '2026-02-27', '2026-03-15', 1, 1, 400, 0, 'Dimanche'),
+
+            -- NOUVELLES REGLES (A partir du 16 Mars 2026)
+            -- Pour tout le monde: New add 200 en semaine et samedi, 300 dimanche. Ads 100
+            ('BA', 'Campagne Actuelle', '2026-03-16', '2099-12-31', 2, 7, 200, 100, 'Semaine'),
+            ('BA', 'Campagne Actuelle', '2026-03-16', '2099-12-31', 1, 1, 300, 100, 'Dimanche'),
+
+            ('BA_AGENCE', 'Campagne Actuelle', '2026-03-16', '2099-12-31', 2, 7, 200, 100, 'Semaine'),
+            ('BA_AGENCE', 'Campagne Actuelle', '2026-03-16', '2099-12-31', 1, 1, 300, 100, 'Dimanche'),
+
+            ('Animation Pick-up', 'Campagne Actuelle', '2026-03-16', '2099-12-31', 2, 7, 200, 100, 'Semaine'),
+            ('Animation Pick-up', 'Campagne Actuelle', '2026-03-16', '2099-12-31', 1, 1, 300, 100, 'Dimanche'),
+
+            ('Animation POS', 'Campagne Actuelle', '2026-03-16', '2099-12-31', 2, 7, 200, 100, 'Semaine'),
+            ('Animation POS', 'Campagne Actuelle', '2026-03-16', '2099-12-31', 1, 1, 300, 100, 'Dimanche'),
+
+            ('MA', 'Campagne Actuelle', '2026-03-16', '2099-12-31', 2, 7, 200, 100, 'Semaine'),
+            ('MA', 'Campagne Actuelle', '2026-03-16', '2099-12-31', 1, 1, 300, 100, 'Dimanche');
             """))
 
             print("3. Creation de la vue vw_commission_gadd...")

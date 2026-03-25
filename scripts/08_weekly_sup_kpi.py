@@ -7,6 +7,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 import pandas as pd
+import numpy as np
 from sqlalchemy import text
 from email.message import EmailMessage
 from openpyxl import Workbook
@@ -113,8 +114,8 @@ def generate_weekly_sup_kpi(engine, target_month, start_week, end_week):
     }
     df_synth_display = df_synth.rename(columns=rename_cols).copy()
     
-    # Calculate % progress
-    df_synth_display['% Objectif GADD'] = df_synth_display['GADD Total MTD'] / df_synth_display['Objectif GADD Mensuel']
+    # Calculate % progress with division by zero protection
+    df_synth_display['% Objectif GADD'] = (df_synth_display['GADD Total MTD'] / df_synth_display['Objectif GADD Mensuel'].replace(0, np.nan)).fillna(0)
     # Reorder columns
     cols = ['Superviseur', 'Catégorie', 'Mois', 'Nb BA Assignés', 'Objectif GADD Mensuel', 'GADD Total MTD', '% Objectif GADD', 'Jours Actifs (>=15 BA)']
     if set(cols).issubset(df_synth_display.columns):

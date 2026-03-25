@@ -18,8 +18,8 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = Path(__file__).parent.parent
-DEFAULT_INPUT = ROOT / "data" / "Performance Acquisition Json new.xlsx"
-DEFAULT_OUTPUT = ROOT / "data" / "performance_acquisition.json"
+DEFAULT_INPUT = ROOT / "data" / "Performance Acquisition Json.xlsx"
+DEFAULT_OUTPUT = ROOT / "data" / "pulse_acquisition.json"
 
 
 def xlsx_to_json(input_path: Path, output_path: Path) -> dict:
