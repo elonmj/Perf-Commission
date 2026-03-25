@@ -10,7 +10,7 @@ Enchaine les etapes dans l'ordre :
   06 → Send report (envoi email)
 
 Flag file : ecrit la date dans last_success.txt apres succes.
-Le Task Scheduler l'appelle a 8h, 12h, 18h ; si le flag du jour
+Le Task Scheduler l'appelle  ; si le flag du jour
 existe deja, le pipeline est saute.
 
 Usage :
@@ -25,6 +25,7 @@ import subprocess
 import argparse
 import smtplib
 import traceback
+import json
 from email.mime.text import MIMEText
 from pathlib import Path
 from datetime import datetime, date
@@ -37,9 +38,81 @@ from connections.config import (
 )
 
 FLAG_PATH = ROOT / FLAG_FILE
+PROCESSED_IDS_FILE = ROOT / "data" / "processed_mail_ids.json"
 
 
 import time
+
+
+def load_processed_state() -> dict:
+    if not PROCESSED_IDS_FILE.exists():
+        return {}
+    try:
+        data = json.loads(PROCESSED_IDS_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            # Compatibilite ancien format
+            return {m_id: {"status": "success", "last_step_completed": "ALL"} for m_id in data}
+        if isinstance(data, dict):
+            return data
+        return {}
+    except Exception:
+        return {}
+
+
+def save_processed_state(state: dict):
+    PROCESSED_IDS_FILE.parent.mkdir(exist_ok=True)
+    PROCESSED_IDS_FILE.write_text(json.dumps(state, indent=4), encoding="utf-8")
+
+
+def get_latest_pending_mail_id(state: dict) -> str | None:
+    # Prend le dernier mail pendings insere dans le dict (ordre d'insertion Python)
+    pending = [m_id for m_id, meta in state.items() if isinstance(meta, dict) and meta.get("status") == "pending"]
+    if not pending:
+        return None
+    return pending[-1]
+
+
+def mark_step_completed(mail_id: str, step_name: str):
+    state = load_processed_state()
+    if mail_id not in state or not isinstance(state[mail_id], dict):
+        state[mail_id] = {"status": "pending", "last_step_completed": step_name}
+    else:
+        state[mail_id]["status"] = "pending"
+        state[mail_id]["last_step_completed"] = step_name
+    save_processed_state(state)
+
+
+def mark_mail_success(mail_id: str):
+    state = load_processed_state()
+    if mail_id not in state or not isinstance(state[mail_id], dict):
+        state[mail_id] = {"status": "success", "last_step_completed": "ALL"}
+    else:
+        state[mail_id]["status"] = "success"
+        state[mail_id]["last_step_completed"] = "ALL"
+    save_processed_state(state)
+
+
+def get_resume_steps(steps: list, mail_id: str | None, state: dict) -> list:
+    """Retourne la liste d'etapes a executer en mode reprise."""
+    if not mail_id:
+        return steps
+
+    mail_meta = state.get(mail_id, {})
+    if not isinstance(mail_meta, dict):
+        mail_meta = {}
+    last_completed = mail_meta.get("last_step_completed")
+
+    # En reprise, on ne refetch pas si le mail est deja telecharge.
+    steps_wo_fetch = [s for s in steps if s[0] != "00 - Fetch Mail"]
+
+    if not last_completed:
+        return steps_wo_fetch
+
+    for idx, step in enumerate(steps_wo_fetch):
+        if step[0] == last_completed:
+            return steps_wo_fetch[idx + 1 :]
+
+    return steps_wo_fetch
 
 def already_done_today() -> bool:
     if not FLAG_PATH.exists():
@@ -155,6 +228,12 @@ def main():
     print(f"=== Pipeline Perf Commissions — {datetime.now().strftime('%Y-%m-%d %H:%M')} ===")
     print()
 
+    processed_state = load_processed_state()
+    current_mail_id = get_latest_pending_mail_id(processed_state)
+    if current_mail_id:
+        last_step = processed_state.get(current_mail_id, {}).get("last_step_completed", "?")
+        print(f"  [Reprise] Mail pending detecte: {current_mail_id} (dernier step OK: {last_step})")
+
     # Verifier le flag
     if not args.force and already_done_today():
         print(f"  Pipeline deja execute aujourd'hui ({date.today()}).")
@@ -193,6 +272,13 @@ def main():
         steps.append(("08 - Weekly Sup KPI", "scripts/08_weekly_sup_kpi.py"))
         steps.append(("09 - Monthly Financial", "scripts/09_monthly_financial.py"))
 
+    # Reprise intelligente: reprendre a la prochaine etape non reussie pour le mail pending.
+    if current_mail_id:
+        original_len = len(steps)
+        steps = get_resume_steps(steps, current_mail_id, processed_state)
+        if len(steps) != original_len:
+            print(f"  [Reprise] {original_len - len(steps)} etape(s) sautee(s), reprise pipeline en cours.")
+
     # Execution sequentielle
     for step in steps:
         name = step[0]
@@ -201,8 +287,20 @@ def main():
 
         ok, err_log, code = run_step(name, script, extra)
         if name == "00 - Fetch Mail" and code == 2:
+            if current_mail_id:
+                print(f"\n  Aucun nouveau mail, reprise maintenue sur mail pending: {current_mail_id}")
+                continue
             print("\n  Aucun nouveau mail PERFORMANCE GLOBALE. Pipeline arrêté sans erreur.")
             sys.exit(0)
+
+        if ok:
+            # Si le fetch a pu telecharger, on recharge l'etat pour capter le nouveau mail pending.
+            if name == "00 - Fetch Mail":
+                processed_state = load_processed_state()
+                current_mail_id = get_latest_pending_mail_id(processed_state)
+            if current_mail_id and name.startswith(("01 -", "02 -", "03 -", "04 -", "05 -", "06 -", "07 -", "08 -", "09 -")):
+                mark_step_completed(current_mail_id, name)
+
         if not ok:
             # Tronque très grand log d'erreur avant de l'envoyer dans l'email
             err_body = err_log[-3500:] if len(err_log) > 3500 else err_log
@@ -211,6 +309,10 @@ def main():
             sys.exit(1)
 
     # Succes
+    if current_mail_id:
+        mark_mail_success(current_mail_id)
+        print(f"  [Historique] Mail marque success : {current_mail_id}")
+
     mark_done()
     print(f"\n{'='*60}")
     print(f"  PIPELINE TERMINE AVEC SUCCES")

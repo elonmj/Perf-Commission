@@ -36,19 +36,27 @@ PROCESSED_IDS_FILE = ROOT / "data" / "processed_mail_ids.json"
 # Lecture (scopes)
 SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 
-def load_processed_ids() -> set:
+def load_processed_ids() -> dict:
     if not PROCESSED_IDS_FILE.exists():
-        return set()
+        return {}
     try:
-        return set(json.loads(PROCESSED_IDS_FILE.read_text(encoding="utf-8")))
-    except:
-        return set()
+        data = json.loads(PROCESSED_IDS_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            # Migration de l'ancien format vers le nouveau
+            return {m_id: {"status": "success", "last_step_completed": "ALL"} for m_id in data}
+        if isinstance(data, dict):
+            return data
+        return {}
+    except Exception:
+        return {}
 
-def save_processed_id(msg_id: str):
+def mark_processing_started(msg_id: str):
     PROCESSED_IDS_FILE.parent.mkdir(exist_ok=True)
     ids = load_processed_ids()
-    ids.add(msg_id)
-    PROCESSED_IDS_FILE.write_text(json.dumps(list(ids)), encoding="utf-8")
+    if msg_id not in ids:
+        ids[msg_id] = {"status": "pending", "last_step_completed": "00 - Fetch Mail"}
+    
+    PROCESSED_IDS_FILE.write_text(json.dumps(ids, indent=4), encoding="utf-8")
 
 
 def notify_desktop(title: str, message: str):
@@ -146,8 +154,11 @@ def fetch_attachment(target_date: datetime | None = None) -> Path | None:
         msg_id = msg["id"]
         
         if msg_id in processed_ids:
-            continue
-            
+            if processed_ids[msg_id].get("status") == "success":
+                continue
+            else:
+                print(f"  [Historique] Mail partiellement traité trouvé : {msg_id}. Reprise ou retéléchargement.")
+                
         def get_all_parts(payload):
             parts = [payload]
             if "parts" in payload:
@@ -186,9 +197,9 @@ def fetch_attachment(target_date: datetime | None = None) -> Path | None:
             dest.write_bytes(file_data)
             print(f"  Fichier sauvegardé : {dest.name}")
 
-            # Enregistrer l'ID comme traité (au lieu de le marquer comme lu)
-            save_processed_id(msg_id)
-            print("  [Historique] Mail marqué comme traité.")
+            # Historique granulaire : fetch termine, les etapes suivantes restent a executer.
+            mark_processing_started(msg_id)
+            print("  [Historique] Mail marque comme telecharge (status=pending).")
 
             downloaded = dest
             break
