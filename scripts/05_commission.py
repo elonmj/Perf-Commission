@@ -144,14 +144,9 @@ def build_tariff_grid(engine, group_channels, data_type, date_ref, is_ma=False):
         for r in res:
             p = r[0]
             val = int(r[1])
-            # Extra Cashback handling specific to MA and Add
-            if is_ma and "Add" in data_type and p in ['Weekend', 'Dimanche'] and val >= 100:
-                val -= 100
+            # Removed extra cashback handling as it is now integrated in the tariff rates
             if p in row:
                 row[p] = val
-
-    if is_ma and "Add" in data_type:
-        row['Cashback'] = 100
     return [row]
 
 def write_sheet(wb, sheet_name, df_pivot, date_start, date_end, data_type="GADD", is_ma=False, engine=None, group_channels=None):
@@ -168,10 +163,7 @@ def write_sheet(wb, sheet_name, df_pivot, date_start, date_end, data_type="GADD"
     tariff_headers = ["PU Semaine", "PU Weekend", "PU Dimanche"]
     tariff_keys = ["Semaine", "Weekend", "Dimanche"]
     
-    if is_ma and "Add" in data_type:
-        tariff_headers.append("PU Cashback (Ven, Sam, Dim)")
-        tariff_keys.append("Cashback")
-
+    # Removed specific Cashback header for MA as new rules merge everything into the base rate
     for c, h in enumerate(tariff_headers, 2): # Colonne B (2) et suivantes
         cell = ws.cell(1, c, h)
         cell.font = SUB_HEADER_FONT
