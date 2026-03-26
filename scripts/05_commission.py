@@ -127,7 +127,7 @@ def pivot_data(df, qty_label="Add", is_ma=False):
             
     return res_df[cols].sort_values(by='TOTAL A PAYER', ascending=False)
 
-def build_tariff_grid(engine, group_channels, data_type, is_ma=False):
+def build_tariff_grid(engine, group_channels, data_type, date_ref, is_ma=False):
     table_col = "taux_gadd" if "Add" in data_type else "taux_ads"
     ch = ", ".join([f"'{c}'" for c in group_channels])
     
@@ -135,11 +135,12 @@ def build_tariff_grid(engine, group_channels, data_type, is_ma=False):
         SELECT periode_nom, MAX({table_col}) as val
         FROM commission_tarifs
         WHERE type_agent IN ({ch})
+          AND :d BETWEEN date_debut AND date_fin
         GROUP BY periode_nom
     """)
     row = {'Semaine': 0, 'Weekend': 0, 'Dimanche': 0}
     with engine.connect() as conn:
-        res = conn.execute(sql).fetchall()
+        res = conn.execute(sql, {"d": date_ref}).fetchall()
         for r in res:
             p = r[0]
             val = int(r[1])
@@ -151,8 +152,7 @@ def build_tariff_grid(engine, group_channels, data_type, is_ma=False):
 
     if is_ma and "Add" in data_type:
         row['Cashback'] = 100
-    elif is_ma and "User" in data_type:
-        # Avoid showing Cashback logic on ADS for MA
+    return [row]
         pass
         
     return [row]
@@ -182,7 +182,7 @@ def write_sheet(wb, sheet_name, df_pivot, date_start, date_end, data_type="GADD"
         cell.border = THIN_BORDER
         cell.alignment = Alignment(horizontal="center")
 
-    for item in build_tariff_grid(engine, group_channels, data_type, is_ma=is_ma):
+    for item in build_tariff_grid(engine, group_channels, data_type, date_end, is_ma=is_ma):
         for c, key in enumerate(tariff_keys, 2):
             cell = ws.cell(2, c, item.get(key, 0))
             cell.border = THIN_BORDER
