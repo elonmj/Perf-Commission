@@ -153,9 +153,6 @@ def build_tariff_grid(engine, group_channels, data_type, date_ref, is_ma=False):
     if is_ma and "Add" in data_type:
         row['Cashback'] = 100
     return [row]
-        pass
-        
-    return [row]
 
 def write_sheet(wb, sheet_name, df_pivot, date_start, date_end, data_type="GADD", is_ma=False, engine=None, group_channels=None):
     ws = wb.create_sheet(sheet_name)
