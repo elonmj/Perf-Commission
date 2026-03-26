@@ -296,21 +296,15 @@ def resolve_date_range(engine, args):
             last_comm_date = max(dates_trouvees)
             dyn_start = last_comm_date + timedelta(days=1)
             
-            if dyn_start >= end:
-                # Comportement par défaut pour les 48h
-                # La date courante des données est "end", on s'assure d'avoir au moins 2 jours (ex: 17 et 18)
-                start = end - timedelta(days=1)
-                end_date = end
+            if dyn_start > end:
+                start = end
             else:
-                # Rattrapage de la dernière date du fichier traité jusqu'à la date maximale des perfs
                 start = dyn_start
-                end_date = end
         else:
-            # Fallback global sans historique : la date max - 1 jour (48h)
-            start = end - timedelta(days=1)
-            end_date = end
+            # Fallback global si aucun fichier de commission précédent n'existe
+            start = end - timedelta(days=AUTO_DAYS_RANGE - 1)
 
-        return (start, end_date)
+        return (start, end)
     else:
         end = datetime.strptime(MANUAL_END_DATE, "%Y-%m-%d").date()
         start = end - timedelta(days=MANUAL_RANGE_DAYS - 1)
