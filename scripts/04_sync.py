@@ -58,7 +58,8 @@ def upsert_agent_info(engine, path: Path) -> list[str]:
     )
     n_invalid = invalid_mask.sum()
     if n_invalid > 0:
-        errors.append(f"agent_perf_info : {n_invalid} lignes ignorees (user_name invalide)")
+        invalid_names = df.loc[invalid_mask, "user_name"].unique().tolist()
+        errors.append(f"agent_perf_info : {n_invalid} lignes ignorees (user_name invalide: {', '.join(map(str, invalid_names))})")
     df = df[~invalid_mask]
 
     df = df.drop_duplicates(subset=["user_name"], keep="last")
@@ -121,7 +122,8 @@ def upsert_daily_metric(engine, path: Path, table: str, value_col: str) -> list[
     )
     n_invalid = invalid_mask.sum()
     if n_invalid > 0:
-        errors.append(f"{table} : {n_invalid} lignes ignorees (user_name invalide)")
+        invalid_names = df.loc[invalid_mask, "user_name"].unique().tolist()
+        errors.append(f"{table} : {n_invalid} lignes ignorees (user_name invalide: {', '.join(map(str, invalid_names))})")
     df = df[~invalid_mask]
 
     df["perf_date"] = pd.to_datetime(df["perf_date"]).dt.date

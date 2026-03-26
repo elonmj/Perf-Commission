@@ -160,22 +160,28 @@ def write_sheet(wb, sheet_name, df_pivot, date_start, date_end, data_type="GADD"
     ws.cell(2, 1, f"Au {format_date_fr(date_end)}").font = Font(bold=True, italic=True)
 
     # 2. MINI-TABLEAU TARIFAIRE (Commence à la colonne 2)
-    tariff_headers = ["PU Semaine", "PU Weekend", "PU Dimanche"]
-    tariff_keys = ["Semaine", "Weekend", "Dimanche"]
+    t_headers = ["PU Semaine", "PU Weekend", "PU Dimanche"]
+    t_keys = ["Semaine", "Weekend", "Dimanche"]
     
-    # Removed specific Cashback header for MA as new rules merge everything into the base rate
-    for c, h in enumerate(tariff_headers, 2): # Colonne B (2) et suivantes
-        cell = ws.cell(1, c, h)
-        cell.font = SUB_HEADER_FONT
-        cell.fill = SUB_HEADER_FILL
-        cell.border = THIN_BORDER
-        cell.alignment = Alignment(horizontal="center")
+    # Récupération des données tarifs
+    tariffs = build_tariff_grid(engine, group_channels, data_type, date_end, is_ma=is_ma)
+    item = tariffs[0] if tariffs else {}
 
-    for item in build_tariff_grid(engine, group_channels, data_type, date_end, is_ma=is_ma):
-        for c, key in enumerate(tariff_keys, 2):
-            cell = ws.cell(2, c, item.get(key, 0))
-            cell.border = THIN_BORDER
-            cell.number_format = CURRENCY_FMT
+    # Filtrage : On ne garde que les tarifs > 0
+    active_pairs = [(h, k) for h, k in zip(t_headers, t_keys) if item.get(k, 0) > 0]
+    
+    for idx, (h, k) in enumerate(active_pairs, 2): # Colonne B (2) et suivantes
+        # En-tête
+        cell_h = ws.cell(1, idx, h)
+        cell_h.font = SUB_HEADER_FONT
+        cell_h.fill = SUB_HEADER_FILL
+        cell_h.border = THIN_BORDER
+        cell_h.alignment = Alignment(horizontal="center")
+        
+        # Valeur
+        cell_v = ws.cell(2, idx, item.get(k, 0))
+        cell_v.border = THIN_BORDER
+        cell_v.number_format = CURRENCY_FMT
 
     # 3. EN-TÊTES DU TABLEAU DE DONNÉES (Ligne 3)
     start_data_row = 3
