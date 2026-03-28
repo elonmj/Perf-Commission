@@ -63,6 +63,7 @@ Monthly_Active_Days AS (
 
 SELECT
     s.superviseur_name,
+    s.region,
     s.type_superviseur,
     m.perf_month,
     m.nb_ba_total,

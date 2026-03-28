@@ -87,13 +87,10 @@ def generate_weekly_sup_kpi(engine, target_month, start_week, end_week):
         else:
             return None
 
-    # Fetch without any prices (sans prix)
-    query_synth = f"SELECT superviseur_name, type_superviseur, perf_month, nb_ba_total, target_mensuel, total_new_add, jours_actifs_15 FROM vw_commission_superviseur WHERE perf_month = '{target_month}'"
+    # Fetch without any prices (sans prix), inclure la région
+    query_synth = f"SELECT superviseur_name, region, type_superviseur, perf_month, nb_ba_total, target_mensuel, total_new_add, jours_actifs_15 FROM vw_commission_superviseur WHERE perf_month = '{target_month}'"
     df_synth = pd.read_sql(query_synth, engine)
     if df_synth.empty: return None
-
-    # Sort descending by GADD
-    df_synth = df_synth.sort_values(by="total_new_add", ascending=False)
     
     output_dir = os.path.join(ROOT, "outputs")
     os.makedirs(output_dir, exist_ok=True)
@@ -105,6 +102,7 @@ def generate_weekly_sup_kpi(engine, target_month, start_week, end_week):
     
     rename_cols = {
         'superviseur_name': 'Superviseur', 
+        'region': 'Region',
         'type_superviseur': 'Catégorie', 
         'perf_month': 'Mois',
         'nb_ba_total': 'Nb BA Assignés', 
@@ -116,19 +114,43 @@ def generate_weekly_sup_kpi(engine, target_month, start_week, end_week):
     
     # Calculate % progress with division by zero protection
     df_synth_display['% Objectif GADD'] = (df_synth_display['GADD Total MTD'] / df_synth_display['Objectif GADD Mensuel'].replace(0, np.nan)).fillna(0)
+    
+    # Calculer le score de performance par région
+    region_scores = df_synth_display.groupby('Region')['% Objectif GADD'].mean().reset_index()
+    region_scores.rename(columns={'% Objectif GADD': 'REGION_SCORE'}, inplace=True)
+    
+    # Fusionner pour trier (pire région d'abord, puis pire superviseur)
+    df_synth_display = df_synth_display.merge(region_scores, on='Region')
+    df_synth_display = df_synth_display.sort_values(by=['REGION_SCORE', 'Region', '% Objectif GADD'], ascending=[True, True, True])
+
     # Reorder columns
-    cols = ['Superviseur', 'Catégorie', 'Mois', 'Nb BA Assignés', 'Objectif GADD Mensuel', 'GADD Total MTD', '% Objectif GADD', 'Jours Actifs (>=15 BA)']
+    cols = ['Region', 'Superviseur', 'Catégorie', 'Mois', 'Nb BA Assignés', 'Objectif GADD Mensuel', 'GADD Total MTD', '% Objectif GADD', 'Jours Actifs (>=15 BA)']
     if set(cols).issubset(df_synth_display.columns):
         df_synth_display = df_synth_display[cols]
     
-    for r in dataframe_to_rows(df_synth_display, index=False, header=True):
-        ws_synth.append(r)
+    # Écriture manuelle pour insérer les lignes vides au changement de région
+    for c_idx, col_name in enumerate(cols, 1):
+        ws_synth.cell(row=1, column=c_idx, value=col_name)
+        
+    current_row = 2
+    last_region = None
+    
+    for _, row_data in df_synth_display.iterrows():
+        region = row_data['Region']
+        if last_region is not None and region != last_region:
+            current_row += 1  # Ligne vide
+        
+        for c_idx, col_name in enumerate(cols, 1):
+            val = row_data[col_name]
+            cell = ws_synth.cell(row=current_row, column=c_idx, value=val)
+            if col_name == '% Objectif GADD':
+                cell.number_format = '0.00%'
+                
+        last_region = region
+        current_row += 1
         
     format_excel_headers(ws_synth, fill_color="00B050")
-    for row in ws_synth.iter_rows(min_row=2, max_row=ws_synth.max_row, min_col=7, max_col=7):   
-        for cell in row:
-            cell.number_format = '0.00%'
-
+    
     wb.save(out_file)
     return out_file
 
