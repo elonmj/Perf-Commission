@@ -186,15 +186,6 @@ def main():
     engine = make_engine(MYSQL_DATABASE)
     all_errors = []
 
-    # ── Agent info ────────────────────────────────────────────────────────────
-    agent_path = find_latest("agent_info")
-    if agent_path:
-        print(f"Agent info : {agent_path.name}")
-        all_errors.extend(upsert_agent_info(engine, agent_path))
-    else:
-        print("  Pas de fichier agent_info dans outputs/.")
-    print()
-
     # ── GADD ──────────────────────────────────────────────────────────────────
     gadd_path = find_latest("gadd_long")
     if gadd_path:

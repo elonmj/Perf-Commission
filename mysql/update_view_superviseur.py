@@ -16,14 +16,14 @@ from connections.connect import make_engine
 VIEW_SUPERVISEUR_INFO = """
 CREATE OR REPLACE VIEW vw_superviseur_info AS
 SELECT
-    superviseur AS superviseur_name,
+    supervisor_first_name AS superviseur_name,
     NULL AS msisdn_momo,
-    IF(UPPER(superviseur) IN ('ROLAND', 'SAMUEL BOSSOU', 'VINCENT DE PAULE', 'VINCENT DE PAUL'), 'Mercenaire', 'Classiques') AS type_superviseur,
+    IF(UPPER(supervisor_first_name) IN ('ROLAND', 'SAMUEL BOSSOU', 'VINCENT DE PAULE', 'VINCENT DE PAUL'), 'Mercenaire', 'Classiques') AS type_superviseur,
     MAX(region) AS region,
     2340 AS target_mensuel
-FROM agent_perf_info
-WHERE superviseur IS NOT NULL AND superviseur != ''
-GROUP BY superviseur;
+FROM lka_client_mtn.lka_usernames
+WHERE supervisor_first_name IS NOT NULL AND supervisor_first_name != ''
+GROUP BY supervisor_first_name;
 """
 
 VIEW_SUPERVISEUR = """
@@ -32,26 +32,26 @@ CREATE OR REPLACE VIEW vw_commission_superviseur AS
 WITH
 Mensuel_Gadd AS (
     SELECT
-        a.superviseur,
+        a.supervisor_first_name as superviseur,
         DATE_FORMAT(g.perf_date, '%Y-%m') AS perf_month,
         COUNT(DISTINCT a.user_name) AS nb_ba_total,
         SUM(g.gadd) AS total_new_add
-    FROM agent_perf_info a
+    FROM lka_client_mtn.lka_usernames a
     JOIN daily_gadd g ON a.user_name = g.user_name
-    WHERE a.superviseur IS NOT NULL AND a.superviseur != ''
-    GROUP BY a.superviseur, DATE_FORMAT(g.perf_date, '%Y-%m')
+    WHERE a.supervisor_first_name IS NOT NULL AND a.supervisor_first_name != ''
+    GROUP BY a.supervisor_first_name, DATE_FORMAT(g.perf_date, '%Y-%m')
 ),
 
 Daily_Active_BAs AS (
     SELECT
-        a.superviseur,
+        a.supervisor_first_name as superviseur,
         DATE_FORMAT(g.perf_date, '%Y-%m') as perf_month,
         g.perf_date,
         COUNT(DISTINCT a.user_name) AS active_bas
-    FROM agent_perf_info a
+    FROM lka_client_mtn.lka_usernames a
     JOIN daily_gadd g ON a.user_name = g.user_name
-    WHERE g.gadd > 0 AND a.superviseur IS NOT NULL AND a.superviseur != ''
-    GROUP BY a.superviseur, DATE_FORMAT(g.perf_date, '%Y-%m'), g.perf_date
+    WHERE g.gadd > 0 AND a.supervisor_first_name IS NOT NULL AND a.supervisor_first_name != ''
+    GROUP BY a.supervisor_first_name, DATE_FORMAT(g.perf_date, '%Y-%m'), g.perf_date
 ),
 
 Monthly_Active_Days AS (
