@@ -150,28 +150,60 @@ def generate_ba_actif_weekly(engine, start_week, end_week):
         'Nb_Actif_La_semaine_denier': 'Nb Actif La semaine denier'
     }, inplace=True)
                            
-    recap['PCT Actif le mois'] = (recap['Nb Actif pour le mois'] / recap['Nb des BA'].replace(0, np.nan)).fillna(0)
-    recap['PCT Actif la semaine dernier'] = (recap['Nb Actif La semaine denier'] / recap['Nb des BA'].replace(0, np.nan)).fillna(0)
+    # Calculer le score de performance par région (moyenne du PCT Actif la semaine dernière)
+    region_scores = recap.groupby('REGION')['PCT Actif la semaine dernier'].mean().reset_index()
+    region_scores.rename(columns={'PCT Actif la semaine dernier': 'REGION_SCORE'}, inplace=True)
     
-    # Sort regions/superviseurs by best performance (descending)
-    recap = recap.sort_values(by=['REGION', 'Description'], ascending=[True, True])
-    # Keep the detailed sheet grouped by region then supervisor for easier reading
+    # Fusionner pour trier : Régions les plus critiques (SCORE faible) d'abord, puis superviseurs critiques
+    recap = recap.merge(region_scores, on='REGION')
+    recap = recap.sort_values(by=['REGION_SCORE', 'REGION', 'PCT Actif la semaine dernier'], ascending=[True, True, True])
+    
+    # Garder le détail pivoté cohérent
     pivot_df = pivot_df.sort_values(by=['REGION', 'Superviseur'])
 
     output_dir = os.path.join(ROOT, "outputs")
     os.makedirs(output_dir, exist_ok=True)
     out_file = os.path.join(output_dir, f"Weekly_BA_Actif_par_Superviseur_{start_week}_to_{end_week}.xlsx")
     
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    
     with pd.ExcelWriter(out_file, engine='openpyxl') as writer:
-        recap.to_excel(writer, sheet_name='Recap', index=False)
+        # On n'utilise pas recap.to_excel directement pour pouvoir insérer des lignes vides
+        workbook = writer.book
+        ws_recap = workbook.create_sheet('Recap')
+        
+        # En-têtes
+        cols = list(recap.columns)
+        # Supprimer le score technique avant l'export
+        if 'REGION_SCORE' in cols: cols.remove('REGION_SCORE')
+        
+        for c_idx, col_name in enumerate(cols, 1):
+            cell = ws_recap.cell(row=1, column=c_idx, value=col_name)
+        
+        current_row = 2
+        last_region = None
+        
+        for _, row_data in recap.iterrows():
+            region = row_data['REGION']
+            # Insérer une ligne vide au changement de région (sauf la première fois)
+            if last_region is not None and region != last_region:
+                current_row += 1
+            
+            for c_idx, col_name in enumerate(cols, 1):
+                val = row_data[col_name]
+                cell = ws_recap.cell(row=current_row, column=c_idx, value=val)
+                # Format Percentage pour les colonnes PCT
+                if 'PCT' in col_name:
+                    cell.number_format = '0.00%'
+            
+            last_region = region
+            current_row += 1
+
+        # Export de l'autre feuille normalement
         pivot_df.to_excel(writer, sheet_name='New Add', index=False)
         
-        ws_recap = writer.sheets['Recap']
+        # Formatage final
         format_excel_headers(ws_recap, fill_color="4F81BD")
-        for row in ws_recap.iter_rows(min_row=2, max_row=ws_recap.max_row, min_col=6, max_col=7):
-            for cell in row:
-                cell.number_format = '0.00%'
-
         ws_new_add = writer.sheets['New Add']
         format_excel_headers(ws_new_add, fill_color="4F81BD")
 
