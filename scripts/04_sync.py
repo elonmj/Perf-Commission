@@ -13,6 +13,7 @@ Usage :
 
 import sys
 import json
+import time
 from pathlib import Path
 from datetime import datetime
 
@@ -38,6 +39,36 @@ def find_latest(prefix: str) -> Path | None:
         reverse=True,
     )
     return files[0] if files else None
+
+
+def execute_with_retry(engine, sql_str, rows, context_name, max_retries=5, delay=5):
+    """Exécute une requête batch avec retry en cas de deconnexion MySQL."""
+    for attempt in range(1, max_retries + 1):
+        raw_conn = None
+        try:
+            raw_conn = engine.raw_connection()
+            cursor = raw_conn.cursor()
+            cursor.executemany(sql_str, rows)
+            raw_conn.commit()
+            return None
+        except Exception as e:
+            if raw_conn:
+                try:
+                    raw_conn.rollback()
+                except Exception:
+                    pass
+            print(f"  [Retry] {context_name} : erreur MySQL — {e} (tentative {attempt}/{max_retries})")
+            if attempt < max_retries:
+                time.sleep(delay)
+            else:
+                return f"{context_name} : erreur MySQL finale — {e}"
+        finally:
+            if raw_conn:
+                try:
+                    raw_conn.close()
+                except Exception:
+                    pass
+    return "Erreur inconnue."
 
 
 def upsert_agent_info(engine, path: Path) -> list[str]:
@@ -94,16 +125,9 @@ def upsert_agent_info(engine, path: Path) -> list[str]:
         clean_rows.append(clean)
 
     # Use raw connection for batch executemany
-    raw_conn = engine.raw_connection()
-    try:
-        cursor = raw_conn.cursor()
-        cursor.executemany(sql_str, clean_rows)
-        raw_conn.commit()
-    except Exception as e:
-        errors.append(f"agent_perf_info : erreur MySQL — {e}")
-        raw_conn.rollback()
-    finally:
-        raw_conn.close()
+    err = execute_with_retry(engine, sql_str, clean_rows, "agent_perf_info")
+    if err:
+        errors.append(err)
 
     print(f"  agent_perf_info : {len(clean_rows)} agents synchronises")
     return errors
@@ -146,16 +170,9 @@ def upsert_daily_metric(engine, path: Path, table: str, value_col: str) -> list[
             value_col: int(row[value_col]),
         })
 
-    raw_conn = engine.raw_connection()
-    try:
-        cursor = raw_conn.cursor()
-        cursor.executemany(sql_str, rows)
-        raw_conn.commit()
-    except Exception as e:
-        errors.append(f"{table} : erreur MySQL — {e}")
-        raw_conn.rollback()
-    finally:
-        raw_conn.close()
+    err = execute_with_retry(engine, sql_str, rows, table)
+    if err:
+        errors.append(err)
 
     dates = sorted(df["perf_date"].unique())
     print(f"  {table} : {len(rows)} lignes synchronisees "
