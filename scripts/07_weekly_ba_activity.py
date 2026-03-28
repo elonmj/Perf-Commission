@@ -26,18 +26,19 @@ get_gmail_service = fetch_mail.get_gmail_service
 
 TRACKER_FILE = ROOT / "data" / "processed_ba_activity_weeks.json"
 
-def get_target_week(max_date, force_current=False):
-    if force_current:
-        days_since_sunday = (max_date.weekday() + 1) % 7
-        start_date = max_date - timedelta(days=days_since_sunday)
-        end_date = max_date
+def get_target_week(max_date, want_current=False):
+    # Semaine complète par défaut (Dernier Samedi)
+    days_since_saturday = (max_date.weekday() + 2) % 7
+    last_saturday = max_date - timedelta(days=days_since_saturday)
+    last_sunday = last_saturday - timedelta(days=6)
+    
+    if not want_current:
+        return last_sunday, last_saturday
     else:
-        days_since_saturday = (max_date.weekday() + 2) % 7
-        last_saturday = max_date - timedelta(days=days_since_saturday)
-        last_sunday = last_saturday - timedelta(days=6)
-        start_date = last_sunday
-        end_date = last_saturday
-    return start_date, end_date
+        # Semaine en cours : du Dimanche le plus récent jusqu'au max_date (ex: Lundi, Mardi...)
+        days_since_sunday = (max_date.weekday() + 1) % 7
+        current_sunday = max_date - timedelta(days=days_since_sunday)
+        return current_sunday, max_date
 
 def load_processed_weeks():
     if not TRACKER_FILE.exists(): return []
@@ -236,14 +237,20 @@ def main():
     if not row or not row[0]: return
 
     max_date = row[0]
-    is_force = os.environ.get("FORCE_SEND_ALL") == "1"
-    start_date, end_date = get_target_week(max_date, is_force)
+    
+    # Check if user requested the "current week" explicitly via flag
+    want_current = "--current" in sys.argv
+    start_date, end_date = get_target_week(max_date, want_current)
     week_id = f"{start_date.strftime('%Y-%m-%d')}_to_{end_date.strftime('%Y-%m-%d')}"
     
-    processed_weeks = load_processed_weeks()
-    if week_id in processed_weeks and not is_force:
-        print(f"  Semaine {week_id} déjà traitée (BA Actif).")
-        sys.exit(0)
+    # We only check/save in tracker if we are doing the official completed week
+    if not want_current:
+        processed_weeks = load_processed_weeks()
+        if week_id in processed_weeks and os.environ.get("FORCE_SEND_ALL") != "1":
+            print(f"  Semaine complète {week_id} déjà traitée (BA Actif).")
+            sys.exit(0)
+    else:
+        print(f"  [Mode CURRENT] Envoi exceptionnel de l'évolution de la semaine en cours : {week_id}")
 
     ba_file = generate_ba_actif_weekly(engine, start_date, end_date)
     
@@ -264,7 +271,8 @@ def main():
     subject_ba = f"📈 BA Actifs par Superviseur/Région ({start_date.strftime('%d/%m')} - {end_date.strftime('%d/%m')})"
     send_email_with_attachment(service, subject_ba, html_ba, ba_file, RECIPIENTS_WEEKLY_BA_ACTIVITY)
 
-    save_processed_week(week_id)
+    if not want_current:
+        save_processed_week(week_id)
     print("  Email Weekly BA Actif envoyé !")
 
 if __name__ == "__main__":
