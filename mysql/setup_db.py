@@ -16,28 +16,10 @@ sys.path.insert(0, ROOT)
 from sqlalchemy import text
 from connections.connect import make_engine
 from connections.config import (
-    MYSQL_DATABASE, TABLE_DAILY_GADD, TABLE_DAILY_ADS, TABLE_AGENT_INFO,
+    MYSQL_DATABASE, TABLE_DAILY_GADD, TABLE_DAILY_ADS,
     MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD,
 )
 
-
-DDL_AGENT_INFO = f"""
-CREATE TABLE IF NOT EXISTS `{TABLE_AGENT_INFO}` (
-    `user_name`     VARCHAR(255) NOT NULL,
-    `id_pulse`      VARCHAR(100) DEFAULT NULL,
-    `region`        VARCHAR(100) DEFAULT NULL,
-    `departement`   VARCHAR(100) DEFAULT NULL,
-    `commune`       VARCHAR(100) DEFAULT NULL,
-    `agent_name`    VARCHAR(255) DEFAULT NULL,
-    `msisdn_momo`   BIGINT       DEFAULT NULL,
-    `p2p`           BIGINT       DEFAULT NULL,
-    `real_channel`  VARCHAR(100) DEFAULT NULL,
-    `superviseur`   VARCHAR(255) DEFAULT NULL,
-    `tss`           VARCHAR(255) DEFAULT NULL,
-    `device_type`   VARCHAR(100) DEFAULT NULL,
-    PRIMARY KEY (`user_name`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-"""
 
 DDL_DAILY_GADD = f"""
 CREATE TABLE IF NOT EXISTS `{TABLE_DAILY_GADD}` (
@@ -130,18 +112,16 @@ def main():
     with engine.connect() as conn:
         if args.drop:
             print("\n  DROP tables (--drop) ...")
-            for t in [TABLE_DAILY_GADD, TABLE_DAILY_ADS, TABLE_AGENT_INFO]:
+            for t in [TABLE_DAILY_GADD, TABLE_DAILY_ADS, "agent_perf_info"]:
                 conn.execute(text(f"DROP TABLE IF EXISTS `{t}`"))
             conn.commit()
             print("  Tables supprimées.")
 
         print(f"\n  Création des tables ...")
-        conn.execute(text(DDL_AGENT_INFO))
         conn.execute(text(DDL_DAILY_GADD))
         conn.execute(text(DDL_DAILY_ADS))
         conn.execute(text(DDL_COMMISSION_TARIFS))
         conn.commit()
-        print(f"  {TABLE_AGENT_INFO} : OK")
         print(f"  {TABLE_DAILY_GADD} : OK")
         print(f"  {TABLE_DAILY_ADS} : OK")
         print(f"  commission_tarifs : OK")

@@ -90,15 +90,15 @@ def generate_monthly_point_financier(engine, target_month):
 
     query_detail = f"""
     SELECT 
-        a.superviseur, a.user_name as agent, a.real_channel as type_agent,
+        a.supervisor_full_name as superviseur, a.user_name as agent, a.real_channel as type_agent,
         SUM(g.gadd) as total_gadd,
         COUNT(DISTINCT CASE WHEN g.gadd > 0 THEN g.perf_date END) as jours_actifs
-    FROM agent_perf_info a
+    FROM lka_client_mtn.lka_usernames a
     JOIN daily_gadd g ON a.user_name = g.user_name
     WHERE DATE_FORMAT(g.perf_date, '%%Y-%%m') = '{target_month}'
-    AND a.superviseur IS NOT NULL AND a.superviseur != ''
-    GROUP BY a.superviseur, a.user_name, a.real_channel
-    ORDER BY a.superviseur, total_gadd DESC
+    AND a.supervisor_full_name IS NOT NULL AND a.supervisor_full_name != '' AND a.supervisor_full_name != 'None'
+    GROUP BY a.supervisor_full_name, a.user_name, a.real_channel
+    ORDER BY a.supervisor_full_name, total_gadd DESC
     """
     df_detail = pd.read_sql(query_detail, engine)
     

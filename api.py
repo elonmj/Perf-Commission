@@ -34,7 +34,7 @@ def get_performance(
     with engine.connect() as conn:
         # 1. Rechercher l'utilisateur avec l'ID Pulse
         res_user = conn.execute(text(
-            "SELECT user_name, agent_name FROM agent_perf_info WHERE id_pulse = :id_pulse LIMIT 1"
+            "SELECT user_name, agent_name FROM lka_client_mtn.lka_usernames WHERE id_pulse = :id_pulse LIMIT 1"
         ), {"id_pulse": id_pulse}).fetchone()
 
         if not res_user:

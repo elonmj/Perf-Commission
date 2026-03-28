@@ -80,13 +80,13 @@ def setup_tarifs():
             conn.execute(text("""
             CREATE OR REPLACE VIEW vw_commission_gadd AS
             SELECT
-                p.user_name, a.superviseur, a.agent_name, a.msisdn_momo, a.real_channel, a.region, a.tss, 
+                p.user_name, a.supervisor_full_name as superviseur, a.agent_name, a.momo_msisdn as msisdn_momo, a.real_channel, a.region, a.tss_name as tss, 
                 p.perf_date, p.gadd, 
                 COALESCE(t.periode_nom, 'Autre') AS periode_nom,
                 COALESCE(t.taux_gadd, 0) AS taux_gadd_applique,
                 p.gadd * COALESCE(t.taux_gadd, 0) AS commission_gadd
             FROM daily_gadd p
-            LEFT JOIN agent_perf_info a ON p.user_name = a.user_name
+            LEFT JOIN lka_client_mtn.lka_usernames a ON p.user_name = a.user_name
             LEFT JOIN commission_tarifs t
                 ON  t.type_agent = a.real_channel
                 AND p.perf_date BETWEEN t.date_debut AND t.date_fin
@@ -97,13 +97,13 @@ def setup_tarifs():
             conn.execute(text("""
             CREATE OR REPLACE VIEW vw_commission_ads AS
             SELECT
-                p.user_name, a.superviseur, a.agent_name, a.msisdn_momo, a.real_channel, a.region, a.tss, 
+                p.user_name, a.supervisor_full_name as superviseur, a.agent_name, a.momo_msisdn as msisdn_momo, a.real_channel, a.region, a.tss_name as tss, 
                 p.perf_date, p.ads, 
                 COALESCE(t.periode_nom, 'Autre') AS periode_nom,
                 COALESCE(t.taux_ads, 0) AS taux_ads_applique,
                 p.ads * COALESCE(t.taux_ads, 0) AS commission_ads
             FROM daily_ads p
-            LEFT JOIN agent_perf_info a ON p.user_name = a.user_name
+            LEFT JOIN lka_client_mtn.lka_usernames a ON p.user_name = a.user_name
             LEFT JOIN commission_tarifs t
                 ON  t.type_agent = a.real_channel
                 AND p.perf_date BETWEEN t.date_debut AND t.date_fin

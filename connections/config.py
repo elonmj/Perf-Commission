@@ -45,7 +45,6 @@ SSH_PASS = os.environ.get("PERF_SSH_PASS", "")
 # ─── TABLES CIBLES ───────────────────────────────────────────────────────────
 TABLE_DAILY_GADD    = "daily_gadd"
 TABLE_DAILY_ADS     = "daily_ads"
-TABLE_AGENT_INFO    = "agent_perf_info"
 
 # ─── GMAIL IMAP / SMTP ───────────────────────────────────────────────────────
 GMAIL_USER        = os.environ.get("PERF_GMAIL_USER", "")
@@ -72,10 +71,6 @@ PERF_AGENT_COL_END     = 15         # col O = device_type
 PERF_METRIC_COL_START  = 16         # col P = first GADD
 
 # ─── COLONNES AGENT (ordre dans le fichier GLOBALE PERFORMANCE) ──────────────
-AGENT_COLUMNS = [
-    "user_name", "region", "departement", "commune", "agent_name",
-    "msisdn_momo", "p2p", "real_channel", "superviseur", "tss", "device_type",
-]
 
 # ─── FICHIER ACQUISITION ──────────────────────────────────────────────────────
 ACQUISITION_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),

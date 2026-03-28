@@ -26,7 +26,7 @@ OUTPUTS = ROOT / "outputs"
 sys.path.insert(0, str(ROOT))
 from connections.config import (
     MYSQL_DATABASE, TABLE_DAILY_GADD, TABLE_DAILY_ADS,
-    TABLE_AGENT_INFO, MSISDN_COLS, AGENT_COLUMNS,
+    MSISDN_COLS, 
     SYNC_ERRORS_FILE,
 )
 from connections.connect import make_engine
@@ -71,66 +71,6 @@ def execute_with_retry(engine, sql_str, rows, context_name, max_retries=5, delay
     return "Erreur inconnue."
 
 
-def upsert_agent_info(engine, path: Path) -> list[str]:
-    """UPSERT agent_perf_info (cle = user_name) — batch mode. Retourne les erreurs."""
-    errors = []
-    df = pd.read_excel(path)
-    for col in MSISDN_COLS:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
-
-    # Filtrer user_name invalides
-    df["user_name"] = df["user_name"].astype(str).str.strip()
-    invalid_mask = (
-        df["user_name"].isna() | (df["user_name"] == "") |
-        df["user_name"].str.replace(".", "", regex=False)
-        .str.replace("-", "", regex=False).str.replace("_", "", regex=False)
-        .str.isdigit()
-    )
-    n_invalid = invalid_mask.sum()
-    if n_invalid > 0:
-        invalid_names = df.loc[invalid_mask, "user_name"].unique().tolist()
-        errors.append(f"agent_perf_info : {n_invalid} lignes ignorees (user_name invalide: {', '.join(map(str, invalid_names))})")
-    df = df[~invalid_mask]
-
-    df = df.drop_duplicates(subset=["user_name"], keep="last")
-
-    update_cols = [c for c in AGENT_COLUMNS if c != "user_name" and c in df.columns]
-    all_cols = ["user_name"] + update_cols
-    placeholders = ", ".join(f"%({c})s" for c in all_cols)
-    col_names = ", ".join(all_cols)
-
-    # Au lieu d'écraser (ON DUPLICATE KEY UPDATE), on fait un INSERT IGNORE
-    # Ainsi, si le user est déjà dans base LKA, on ne l'écrase pas avec les
-    # colonnes souvent cassées du fichier des performances du client !
-    sql_str = (
-        f"INSERT IGNORE INTO {TABLE_AGENT_INFO} ({col_names}) "
-        f"VALUES ({placeholders})"
-    )
-
-    rows = df[all_cols].to_dict("records")
-    clean_rows = []
-    for row in rows:
-        clean = {}
-        for k, v in row.items():
-            if v is None or (not isinstance(v, str) and pd.isna(v)):
-                clean[k] = None
-            elif k in MSISDN_COLS:
-                try:
-                    clean[k] = int(v)
-                except (ValueError, TypeError):
-                    clean[k] = None
-            else:
-                clean[k] = str(v) if v is not None else None
-        clean_rows.append(clean)
-
-    # Use raw connection for batch executemany
-    err = execute_with_retry(engine, sql_str, clean_rows, "agent_perf_info")
-    if err:
-        errors.append(err)
-
-    print(f"  agent_perf_info : {len(clean_rows)} agents synchronises")
-    return errors
 
 
 def upsert_daily_metric(engine, path: Path, table: str, value_col: str) -> list[str]:

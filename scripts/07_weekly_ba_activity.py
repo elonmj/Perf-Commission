@@ -82,28 +82,28 @@ def generate_ba_actif_weekly(engine, start_week, end_week):
     query = f"""
     SELECT 
         a.user_name as `USER NAME`,
-        'LKA SERVICES' as `DEALER`,
+        a.dealer as `DEALER`,
         a.region as `REGION`,
         a.departement as `DEPARTEMENT`,
         a.commune as `COMMUNE`,
-        'LKA SERVICES' as `ENTERPRISE_NAME`,
+        a.enterprise_name as `ENTERPRISE_NAME`,
         a.agent_name as `AGENT_NAME`,
-        a.msisdn_momo as `MOMO_MSISDN`,
-        a.p2p as `P2P MSISDN`,
+        a.momo_msisdn as `MOMO_MSISDN`,
+        a.p2p_msisdn as `P2P MSISDN`,
         a.real_channel as `REAL_CHANNEL`,
-        a.superviseur as `Superviseur`,
-        '' as `SUP_MOMO_MSISDN`,
-        a.tss as `TSS NAME`,
-        a.real_channel as `OTHER DEALERS`,
-        a.msisdn_momo as `Numero Pulse`,
+        a.supervisor_full_name as `Superviseur`,
+        a.sup_momo_msisdn as `SUP_MOMO_MSISDN`,
+        a.tss_name as `TSS NAME`,
+        a.other_dealers as `OTHER DEALERS`,
+        a.numero_pulse as `Numero Pulse`,
         a.id_pulse as `Id pulse`,
         g.perf_date as `perf_date`,
         COALESCE(g.gadd, 0) as `gadd`
-    FROM agent_perf_info a
+    FROM lka_client_mtn.lka_usernames a
     LEFT JOIN daily_gadd g ON a.user_name = g.user_name 
                           AND g.perf_date >= '{start_of_month}' 
                           AND g.perf_date <= '{end_week}'
-    WHERE a.superviseur IS NOT NULL AND a.superviseur != ''
+    WHERE a.supervisor_full_name IS NOT NULL AND a.supervisor_full_name != '' AND a.supervisor_full_name != 'None'
     """
     df = pd.read_sql(query, engine)
     

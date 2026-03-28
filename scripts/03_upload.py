@@ -5,7 +5,6 @@ Lit les fichiers cumulatifs (GADD_cumul.xlsx, ADS_cumul.xlsx) et les outputs
 agent_info, puis fait un chargement complet dans les tables MySQL :
   - daily_gadd  (TRUNCATE + INSERT)
   - daily_ads   (TRUNCATE + INSERT)
-  - agent_perf_info (TRUNCATE + INSERT)
 
 A utiliser pour le tout premier chargement ou pour un re-chargement complet.
 Pour les mises a jour quotidiennes, utiliser 04_sync.py.
@@ -30,7 +29,7 @@ CUMUL = ROOT / "cumul"
 sys.path.insert(0, str(ROOT))
 from connections.config import (
     MYSQL_DATABASE, TABLE_DAILY_GADD, TABLE_DAILY_ADS,
-    TABLE_AGENT_INFO, MSISDN_COLS,
+    
 )
 from connections.connect import make_engine
 
@@ -81,44 +80,6 @@ def load_cumul_to_long(path: Path, value_col: str) -> pd.DataFrame:
     return melted[["user_name", "perf_date", value_col]].reset_index(drop=True)
 
 
-def find_latest_agent_info() -> Path | None:
-    files = sorted(
-        OUTPUTS.glob("agent_info_*.xlsx"),
-        key=lambda f: f.stat().st_mtime,
-        reverse=True,
-    )
-    return files[0] if files else None
-
-
-def upload_agent_info(engine):
-    """Charge agent_perf_info depuis le dernier export."""
-    path = find_latest_agent_info()
-    if not path:
-        print("  WARN: Pas de fichier agent_info dans outputs/. Table agent_perf_info ignoree.")
-        return
-
-    df = pd.read_excel(path)
-    # user_name est la cle primaire
-    df["user_name"] = df["user_name"].astype(str).str.strip()
-    df = df[df["user_name"].notna() & (df["user_name"] != "")]
-    df = df[~df["user_name"].str.replace(".", "", regex=False)
-            .str.replace("-", "", regex=False).str.replace("_", "", regex=False)
-            .str.isdigit()]
-
-    for col in MSISDN_COLS:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
-
-    # Dedup sur user_name
-    df = df.drop_duplicates(subset=["user_name"], keep="last")
-
-    with engine.begin() as conn:
-        conn.execute(text(f"TRUNCATE TABLE {TABLE_AGENT_INFO}"))
-
-    df.to_sql(TABLE_AGENT_INFO, engine, if_exists="append", index=False)
-    print(f"  agent_perf_info : {len(df)} agents charges")
-
-
 def upload_daily_metric(engine, cumul_path: Path, table: str, value_col: str):
     """Charge un fichier cumulatif dans la table daily correspondante."""
     if not cumul_path.exists():
@@ -166,8 +127,7 @@ def main():
     engine = make_engine(MYSQL_DATABASE)
 
     # Agent info
-    upload_agent_info(engine)
-    print()
+        print()
 
     # GADD
     upload_daily_metric(engine, gadd_cumul, TABLE_DAILY_GADD, "gadd")
