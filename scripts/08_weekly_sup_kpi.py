@@ -52,6 +52,10 @@ def save_processed_week(week_id):
         TRACKER_FILE.write_text(json.dumps(weeks), encoding="utf-8")
 
 def send_email_with_attachment(service, subject, html_content, attachment_path, to_emails):
+    if not to_emails:
+        print("  [DEBUG] Aucun destinataire spécifié. Envoi d'email ignoré.")
+        return
+
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = "me"
