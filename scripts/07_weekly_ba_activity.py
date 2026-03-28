@@ -150,6 +150,12 @@ def generate_ba_actif_weekly(engine, start_week, end_week):
         'Nb_Actif_La_semaine_denier': 'Nb Actif La semaine denier'
     }, inplace=True)
                            
+    # PCTs
+    recap['PCT Actif le mois'] = recap['Nb Actif pour le mois'] / recap.replace(0, pd.NA)['Nb des BA']
+    recap['PCT Actif la semaine dernier'] = recap['Nb Actif La semaine denier'] / recap.replace(0, pd.NA)['Nb des BA']
+    recap['PCT Actif le mois'] = recap['PCT Actif le mois'].fillna(0)
+    recap['PCT Actif la semaine dernier'] = recap['PCT Actif la semaine dernier'].fillna(0)
+
     # Calculer le score de performance par région (moyenne du PCT Actif la semaine dernière)
     region_scores = recap.groupby('REGION')['PCT Actif la semaine dernier'].mean().reset_index()
     region_scores.rename(columns={'PCT Actif la semaine dernier': 'REGION_SCORE'}, inplace=True)
