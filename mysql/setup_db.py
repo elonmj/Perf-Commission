@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS `commission_tarifs` (
 VIEW_GADD = """
 CREATE OR REPLACE VIEW vw_commission_gadd AS
 SELECT
-    p.user_name, a.supervisor_first_name as superviseur, a.agent_name, a.momo_msisdn as msisdn_momo, a.real_channel, a.region, a.tss_name as tss,
+    p.user_name, a.supervisor_full_name as superviseur, a.agent_name, a.momo_msisdn as msisdn_momo, a.real_channel, a.region, a.tss_name as tss,
     p.perf_date, p.gadd,
     COALESCE(t.periode_nom, 'Autre') AS periode_nom,
     COALESCE(t.taux_gadd, 0) AS taux_gadd_applique,
@@ -73,7 +73,7 @@ LEFT JOIN commission_tarifs t
 VIEW_ADS = """
 CREATE OR REPLACE VIEW vw_commission_ads AS
 SELECT
-    p.user_name, a.supervisor_first_name as superviseur, a.agent_name, a.momo_msisdn as msisdn_momo, a.real_channel, a.region, a.tss_name as tss,
+    p.user_name, a.supervisor_full_name as superviseur, a.agent_name, a.momo_msisdn as msisdn_momo, a.real_channel, a.region, a.tss_name as tss,
     p.perf_date, p.ads,
     COALESCE(t.periode_nom, 'Autre') AS periode_nom,
     COALESCE(t.taux_ads, 0) AS taux_ads_applique,
