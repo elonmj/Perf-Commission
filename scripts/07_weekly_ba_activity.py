@@ -26,11 +26,18 @@ get_gmail_service = fetch_mail.get_gmail_service
 
 TRACKER_FILE = ROOT / "data" / "processed_ba_activity_weeks.json"
 
-def get_last_completed_week(max_date):
-    days_since_friday = (max_date.weekday() - 4) % 7
-    last_friday = max_date - timedelta(days=days_since_friday)
-    last_saturday = last_friday - timedelta(days=6)
-    return last_saturday, last_friday
+def get_target_week(max_date, force_current=False):
+    if force_current:
+        days_since_sunday = (max_date.weekday() + 1) % 7
+        start_date = max_date - timedelta(days=days_since_sunday)
+        end_date = max_date
+    else:
+        days_since_saturday = (max_date.weekday() + 2) % 7
+        last_saturday = max_date - timedelta(days=days_since_saturday)
+        last_sunday = last_saturday - timedelta(days=6)
+        start_date = last_sunday
+        end_date = last_saturday
+    return start_date, end_date
 
 def load_processed_weeks():
     if not TRACKER_FILE.exists(): return []
@@ -225,11 +232,12 @@ def main():
     if not row or not row[0]: return
 
     max_date = row[0]
-    start_date, end_date = get_last_completed_week(max_date)
+    is_force = os.environ.get("FORCE_SEND_ALL") == "1"
+    start_date, end_date = get_target_week(max_date, is_force)
     week_id = f"{start_date.strftime('%Y-%m-%d')}_to_{end_date.strftime('%Y-%m-%d')}"
     
     processed_weeks = load_processed_weeks()
-    if week_id in processed_weeks and os.environ.get("FORCE_SEND_ALL") != "1":
+    if week_id in processed_weeks and not is_force:
         print(f"  Semaine {week_id} déjà traitée (BA Actif).")
         sys.exit(0)
 
