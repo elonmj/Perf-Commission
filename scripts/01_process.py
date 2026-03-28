@@ -83,9 +83,42 @@ def parse_perf_file(path: Path):
     max_row = ws.max_row
     max_col = ws.max_column
 
+    # -- RECHERCHE DYNAMIQUE DES COLONNES --
+    real_agent_col_start = PERF_AGENT_COL_START
+    for c in range(1, max_col + 1):
+        if str(ws.cell(PERF_HEADER_ROW, c).value).strip() == "user_name":
+            real_agent_col_start = c
+            break
+
+    # Recherche depuis user_name de la première colonne GADD/ADS
+    real_metric_col_start = None
+    for c in range(real_agent_col_start + 1, max_col + 1):
+        val = ws.cell(PERF_HEADER_ROW, c).value
+        if val is not None and str(val).strip().upper() in ["GADD", "ADS"]:
+            real_metric_col_start = c
+            break
+            
+    if real_metric_col_start is None:
+        # Fallback au comportement par défaut
+        real_metric_col_start = real_agent_col_start + len(AGENT_COLUMNS)
+        
+    real_agent_col_end = real_metric_col_start - 1
+
+    DYNAMIC_AGENT_COLUMNS = []
+    for c in range(real_agent_col_start, real_agent_col_end + 1):
+        v = ws.cell(PERF_HEADER_ROW, c).value
+        # normalize and map alias
+        if v is not None:
+            v_str = str(v).strip().lower()
+            if v_str == "tsa":
+                v_str = "tss"
+            DYNAMIC_AGENT_COLUMNS.append(v_str)
+        else:
+            DYNAMIC_AGENT_COLUMNS.append(f"col_{c}")
+
     # ── 1. Lire les dates depuis row 4 (merged cells → seul le coin haut-gauche a la valeur)
     dates_by_col = {}
-    for c in range(PERF_METRIC_COL_START, max_col + 1):
+    for c in range(real_metric_col_start, max_col + 1):
         val = ws.cell(PERF_DATE_ROW, c).value
         if val is not None:
             if isinstance(val, datetime):
@@ -99,7 +132,7 @@ def parse_perf_file(path: Path):
     # Propager les dates aux colonnes ADS (merged → col suivante)
     date_map = {}  # col_index → date
     last_date = None
-    for c in range(PERF_METRIC_COL_START, max_col + 1):
+    for c in range(real_metric_col_start, max_col + 1):
         if c in dates_by_col:
             last_date = dates_by_col[c]
         if last_date is not None:
@@ -107,7 +140,7 @@ def parse_perf_file(path: Path):
 
     # ── 2. Lire les sub-headers (GADD/ADS) depuis row 5
     sub_headers = {}
-    for c in range(PERF_METRIC_COL_START, max_col + 1):
+    for c in range(real_metric_col_start, max_col + 1):
         val = ws.cell(PERF_HEADER_ROW, c).value
         if val is not None:
             sub_headers[c] = str(val).strip().upper()
@@ -120,7 +153,7 @@ def parse_perf_file(path: Path):
     for r in range(PERF_DATA_START_ROW, max_row + 1):
         # Agent info (cols 5..15)
         agent_vals = []
-        for c in range(PERF_AGENT_COL_START, PERF_AGENT_COL_END + 1):
+        for c in range(real_agent_col_start, real_agent_col_end + 1):
             agent_vals.append(ws.cell(r, c).value)
 
         # Skip empty or invalid rows (None, empty, numeric-only like 0)
@@ -131,14 +164,14 @@ def parse_perf_file(path: Path):
         if uname_str.replace(".", "").replace("-", "").replace("_", "").isdigit():
             continue  # Skip numeric-only usernames (e.g. 0)
 
-        agent_dict = dict(zip(AGENT_COLUMNS, agent_vals))
+        agent_dict = dict(zip(DYNAMIC_AGENT_COLUMNS, agent_vals))
         agent_rows.append(agent_dict)
 
         msisdn = agent_dict.get("msisdn_momo")
         uname = uname_str
 
         # Metric cols (GADD, ADS alternating)
-        for c in range(PERF_METRIC_COL_START, max_col + 1):
+        for c in range(real_metric_col_start, max_col + 1):
             if c not in date_map or c not in sub_headers:
                 continue
             val = ws.cell(r, c).value
