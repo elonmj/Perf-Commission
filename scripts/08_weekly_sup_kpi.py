@@ -27,10 +27,10 @@ get_gmail_service = fetch_mail.get_gmail_service
 TRACKER_FILE = ROOT / "data" / "processed_sup_kpi_weeks.json"
 
 def get_last_completed_week(max_date):
-    days_since_saturday = (max_date.weekday() - 5) % 7
-    last_saturday = max_date - timedelta(days=days_since_saturday)
-    last_sunday = last_saturday - timedelta(days=6)
-    return last_sunday, last_saturday
+    days_since_friday = (max_date.weekday() - 4) % 7
+    last_friday = max_date - timedelta(days=days_since_friday)
+    last_saturday = last_friday - timedelta(days=6)
+    return last_saturday, last_friday
 
 def load_processed_weeks():
     if not TRACKER_FILE.exists(): return []
