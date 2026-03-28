@@ -96,16 +96,16 @@ def upsert_agent_info(engine, path: Path) -> list[str]:
     df = df.drop_duplicates(subset=["user_name"], keep="last")
 
     update_cols = [c for c in AGENT_COLUMNS if c != "user_name" and c in df.columns]
-    update_clause = ", ".join(f"{c} = VALUES({c})" for c in update_cols)
-
     all_cols = ["user_name"] + update_cols
     placeholders = ", ".join(f"%({c})s" for c in all_cols)
     col_names = ", ".join(all_cols)
 
+    # Au lieu d'écraser (ON DUPLICATE KEY UPDATE), on fait un INSERT IGNORE
+    # Ainsi, si le user est déjà dans base LKA, on ne l'écrase pas avec les
+    # colonnes souvent cassées du fichier des performances du client !
     sql_str = (
-        f"INSERT INTO {TABLE_AGENT_INFO} ({col_names}) "
-        f"VALUES ({placeholders}) "
-        f"ON DUPLICATE KEY UPDATE {update_clause}"
+        f"INSERT IGNORE INTO {TABLE_AGENT_INFO} ({col_names}) "
+        f"VALUES ({placeholders})"
     )
 
     rows = df[all_cols].to_dict("records")
