@@ -66,11 +66,21 @@ PERF_SHEET_NAME        = "WEEKLYGLOBAL"
 PERF_HEADER_ROW        = 5          # row 5 (1-indexed) = column headers
 PERF_DATE_ROW          = 4          # row 4 = merged date headers
 PERF_DATA_START_ROW    = 6          # data begins on row 6
-PERF_AGENT_COL_START   = 5          # col E = user_name (1-indexed)
-PERF_AGENT_COL_END     = 15         # col O = device_type
-PERF_METRIC_COL_START  = 16         # col P = first GADD
+# Ancien format (≤ 2026-03-19, sheet "WEEKLYGLOBAL") : user_name=col5,  GADD=col16
+# Nouveau format (≥ 2026-03-22, sheet "WEEKLY")      : user_name=col15, GADD=col25
+# Ces valeurs ne sont plus utilisées directement — la détection est dynamique dans 01_process.py.
+PERF_AGENT_COL_START   = 5          # ancien format (référence historique)
+PERF_AGENT_COL_END     = 24         # nouveau format : col X = device_type
+PERF_METRIC_COL_START  = 25         # nouveau format : col Y = premier GADD
 
 # ─── COLONNES AGENT (ordre dans le fichier GLOBALE PERFORMANCE) ──────────────
+# Format courant (≥ 2026-03-22, sheet "WEEKLY") : 10 colonnes, sans P2P
+# Format ancien  (≤ 2026-03-19)               : 11 colonnes, avec "p2p" entre msisdn_momo et real_channel
+# La détection dans 01_process.py lit les noms directement depuis le fichier.
+AGENT_COLUMNS = [
+    "user_name", "region", "departement", "commune", "agent_name",
+    "msisdn_momo", "real_channel", "superviseur", "tss", "device_type",
+]
 
 # ─── FICHIER ACQUISITION ──────────────────────────────────────────────────────
 ACQUISITION_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),

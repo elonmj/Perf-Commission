@@ -29,10 +29,7 @@ REPORTS = ROOT / "reports"
 
 sys.path.insert(0, str(ROOT))
 from connections.config import (
-    PERF_SHEET_NAME, PERF_HEADER_ROW, PERF_DATE_ROW,
-    PERF_DATA_START_ROW, PERF_AGENT_COL_START, PERF_AGENT_COL_END,
-    PERF_METRIC_COL_START, AGENT_COLUMNS, MSISDN_COLS,
-    REGION_NORMALIZATION,
+    PERF_HEADER_ROW, MSISDN_COLS, REGION_NORMALIZATION,
 )
 
 
@@ -84,30 +81,58 @@ def parse_perf_file(path: Path):
     max_col = ws.max_column
 
     # -- RECHERCHE DYNAMIQUE DES COLONNES --
-    real_agent_col_start = PERF_AGENT_COL_START
-    for c in range(1, max_col + 1):
-        if str(ws.cell(PERF_HEADER_ROW, c).value).strip() == "user_name":
-            real_agent_col_start = c
+    # Sonde ±2 lignes autour de PERF_HEADER_ROW — absorbe un décalage si des lignes
+    # sont ajoutées en haut du fichier. Comparaison case-insensitive.
+    real_header_row      = PERF_HEADER_ROW  # sera mis à jour si trouvé ailleurs
+    real_agent_col_start = 0               # sentinel : 0 = non trouvé
+    scan_start = max(1, PERF_HEADER_ROW - 2)
+    scan_end   = PERF_HEADER_ROW + 2
+    for probe_row in range(scan_start, scan_end + 1):
+        for c in range(1, max_col + 1):
+            v = ws.cell(probe_row, c).value
+            if v is not None and str(v).strip().lower() == "user_name":
+                real_header_row      = probe_row
+                real_agent_col_start = c
+                break
+        if real_agent_col_start != 0:
             break
 
-    # Recherche depuis user_name de la première colonne GADD/ADS
-    real_metric_col_start = None
+    if real_agent_col_start == 0:
+        raise ValueError(
+            f"Colonne 'user_name' introuvable dans les lignes {scan_start}-{scan_end} "
+            f"de '{path.name}'. Vérifiez la structure du fichier "
+            f"(en-tête attendu autour de la ligne {PERF_HEADER_ROW})."
+        )
+
+    # Lignes date et données : immédiatement au-dessus / en-dessous du header détecté
+    real_date_row       = real_header_row - 1  # ligne merged des dates
+    real_data_start_row = real_header_row + 1  # première ligne de données
+
+    # Recherche de la première colonne GADD ou ADS (case-insensitive)
+    real_metric_col_start = 0  # sentinel : 0 = non trouvé
     for c in range(real_agent_col_start + 1, max_col + 1):
-        val = ws.cell(PERF_HEADER_ROW, c).value
-        if val is not None and str(val).strip().upper() in ["GADD", "ADS"]:
+        val = ws.cell(real_header_row, c).value
+        if val is not None and str(val).strip().upper() in ("GADD", "ADS"):
             real_metric_col_start = c
             break
-            
-    if real_metric_col_start is None:
-        # Fallback au comportement par défaut
-        real_metric_col_start = real_agent_col_start + len(AGENT_COLUMNS)
-        
+
+    if real_metric_col_start == 0:
+        raise ValueError(
+            f"Colonne GADD/ADS introuvable après 'user_name' (col {real_agent_col_start}, "
+            f"row {real_header_row}) dans '{path.name}'. Vérifiez la structure du fichier."
+        )
+
     real_agent_col_end = real_metric_col_start - 1
+    print(
+        f"  [Info] Header row={real_header_row}, "
+        f"agent cols={real_agent_col_start}-{real_agent_col_end}, "
+        f"métriques col={real_metric_col_start}+, "
+        f"date row={real_date_row}, données row={real_data_start_row}+"
+    )
 
     DYNAMIC_AGENT_COLUMNS = []
     for c in range(real_agent_col_start, real_agent_col_end + 1):
-        v = ws.cell(PERF_HEADER_ROW, c).value
-        # normalize and map alias
+        v = ws.cell(real_header_row, c).value
         if v is not None:
             v_str = str(v).strip().lower()
             if v_str == "tsa":
@@ -116,10 +141,10 @@ def parse_perf_file(path: Path):
         else:
             DYNAMIC_AGENT_COLUMNS.append(f"col_{c}")
 
-    # ── 1. Lire les dates depuis row 4 (merged cells → seul le coin haut-gauche a la valeur)
+    # ── 1. Lire les dates (ligne merged au-dessus du header — seul le coin haut-gauche a la valeur)
     dates_by_col = {}
     for c in range(real_metric_col_start, max_col + 1):
-        val = ws.cell(PERF_DATE_ROW, c).value
+        val = ws.cell(real_date_row, c).value
         if val is not None:
             if isinstance(val, datetime):
                 dates_by_col[c] = val.date()
@@ -129,7 +154,7 @@ def parse_perf_file(path: Path):
                 except Exception:
                     pass
 
-    # Propager les dates aux colonnes ADS (merged → col suivante)
+    # Propager les dates aux colonnes ADS (merged → col suivante sans valeur)
     date_map = {}  # col_index → date
     last_date = None
     for c in range(real_metric_col_start, max_col + 1):
@@ -138,10 +163,10 @@ def parse_perf_file(path: Path):
         if last_date is not None:
             date_map[c] = last_date
 
-    # ── 2. Lire les sub-headers (GADD/ADS) depuis row 5
+    # ── 2. Lire les sub-headers (GADD/ADS) depuis le header row
     sub_headers = {}
     for c in range(real_metric_col_start, max_col + 1):
-        val = ws.cell(PERF_HEADER_ROW, c).value
+        val = ws.cell(real_header_row, c).value
         if val is not None:
             sub_headers[c] = str(val).strip().upper()
 
@@ -150,7 +175,7 @@ def parse_perf_file(path: Path):
     gadd_records = []
     ads_records = []
 
-    for r in range(PERF_DATA_START_ROW, max_row + 1):
+    for r in range(real_data_start_row, max_row + 1):
         # Agent info (cols 5..15)
         agent_vals = []
         for c in range(real_agent_col_start, real_agent_col_end + 1):
@@ -344,10 +369,6 @@ def main():
     if "region" in df_agent.columns:
         print("  ── Régions ──")
         for val, cnt in df_agent["region"].value_counts().items():
-            print(f"     {val}: {cnt}")
-    if "real_channel" in df_agent.columns:
-        print("  ── Canaux ──")
-        for val, cnt in df_agent["real_channel"].value_counts().items():
             print(f"     {val}: {cnt}")
 
     print()
