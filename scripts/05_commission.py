@@ -273,6 +273,7 @@ def resolve_date_range(engine, args):
         # Trouver la dernière date traitée dans les fichiers du répertoire outputs/
         pattern_old = r"commission_.*?(\d{4}-\d{2}-\d{2})\.xlsx$"
         pattern_new = r"Variables .* (\d{2}-\d{2}-\d{4})\.xlsx$"
+        pattern_unified = r"Commission LKA .* (\d{2}-\d{2}-\d{4})\.xlsx$"
         
         dates_trouvees = []
         if os.path.exists(OUTPUTS):
@@ -282,10 +283,15 @@ def resolve_date_range(engine, args):
                 if m_old:
                     dates_trouvees.append(datetime.strptime(m_old.group(1), "%Y-%m-%d").date())
                 
-                # Nouveau format
+                # Ancien format multi-fichier
                 m_new = re.search(pattern_new, f)
                 if m_new:
                     dates_trouvees.append(datetime.strptime(m_new.group(1), "%d-%m-%Y").date())
+
+                # Format unifié (fichier unique)
+                m_uni = re.search(pattern_unified, f)
+                if m_uni:
+                    dates_trouvees.append(datetime.strptime(m_uni.group(1), "%d-%m-%Y").date())
                     
         if dates_trouvees:
             last_comm_date = max(dates_trouvees)
@@ -328,12 +334,23 @@ def main():
         "MA Acquisition": ["MA"]
     }
 
+    # Noms courts pour les onglets Excel (max 31 caractères)
+    SHEET_NAMES = {
+        "BA Animation": "BA Animation",
+        "BA Classiques & BA AGENCE": "BA Class. & AGENCE",
+        "MA Acquisition": "MA Acquisition",
+    }
+
     OUTPUTS.mkdir(exist_ok=True)
+
+    wb = Workbook()
+    if wb.active is not None:
+        wb.remove(wb.active)
 
     for group_name, group_channels in FILE_GROUPS.items():
         print(f"\n---> Génération pour le groupe : {group_name}")
         
-        # Filtre sur les canaux spécifiques à ce fichier
+        # Filtre sur les canaux spécifiques à ce groupe
         df_g_grp = df_gadd_raw[df_gadd_raw['real_channel'].isin(group_channels)].copy() if not df_gadd_raw.empty else pd.DataFrame()
         df_a_grp  = df_ads_raw[df_ads_raw['real_channel'].isin(group_channels)].copy() if not df_ads_raw.empty else pd.DataFrame()
 
@@ -342,22 +359,21 @@ def main():
             continue
 
         is_ma = (group_name == "MA Acquisition")
+        short = SHEET_NAMES.get(group_name, group_name)
 
         df_gadd = pivot_data(df_g_grp, qty_label="Add", is_ma=is_ma)
         df_ads  = pivot_data(df_a_grp, qty_label="ADS", is_ma=is_ma)
 
-        wb = Workbook()
-        if wb.active is not None:
-            wb.remove(wb.active)
-
-        write_sheet(wb, "New Add (GADD)", df_gadd, date_start, date_end, f"Variables {group_name} - New Add", is_ma=is_ma, engine=engine, group_channels=group_channels)
-        write_sheet(wb, "New UserData (ADS)", df_ads, date_start, date_end, f"Variables {group_name} - New UserData", is_ma=is_ma, engine=engine, group_channels=group_channels)
-
-        out_name = f"Variables {group_name} {date_start.strftime('%d-%m-%Y')} - {date_end.strftime('%d-%m-%Y')}.xlsx"
-        out_path = OUTPUTS / out_name
-        wb.save(out_path)
+        write_sheet(wb, f"{short} (GADD)", df_gadd, date_start, date_end, f"{group_name} - New Add", is_ma=is_ma, engine=engine, group_channels=group_channels)
+        write_sheet(wb, f"{short} (ADS)", df_ads, date_start, date_end, f"{group_name} - New UserData", is_ma=is_ma, engine=engine, group_channels=group_channels)
         
-        print(f"✅ Fichier généré : {out_path.name}")
+        print(f"✅ Feuilles ajoutées : {short} (GADD), {short} (ADS)")
+
+    out_name = f"Commission LKA {date_start.strftime('%d-%m-%Y')} - {date_end.strftime('%d-%m-%Y')}.xlsx"
+    out_path = OUTPUTS / out_name
+    wb.save(out_path)
+    
+    print(f"\n✅ Fichier généré : {out_path.name}")
 
 if __name__ == "__main__":
     main()

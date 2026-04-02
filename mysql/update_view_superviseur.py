@@ -20,7 +20,7 @@ SELECT
     NULL AS msisdn_momo,
     IF(UPPER(supervisor_first_name) IN ('ROLAND', 'SAMUEL BOSSOU', 'VINCENT DE PAULE', 'VINCENT DE PAUL'), 'Mercenaire', 'Classiques') AS type_superviseur,
     MAX(region) AS region,
-    2340 AS target_mensuel
+    3750 AS target_mensuel
 FROM lka_client_mtn.lka_usernames
 WHERE supervisor_first_name IS NOT NULL AND supervisor_first_name != ''
 GROUP BY supervisor_first_name;

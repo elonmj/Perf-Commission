@@ -48,14 +48,23 @@ def find_latest_commissions(override: str | None = None) -> list[Path]:
             raise FileNotFoundError(f"Fichier introuvable : {override}")
         return [p]
 
-    # Look for the new format "Variables*.xlsx"
+    # Format unifié : un seul fichier "Commission LKA*.xlsx"
+    files = sorted(
+        OUTPUTS.glob("Commission LKA*.xlsx"),
+        key=lambda f: f.stat().st_mtime,
+        reverse=True,
+    )
+    if files:
+        return [files[0]]
+
+    # Fallback : ancien format multi-fichier "Variables*.xlsx"
     files = sorted(
         OUTPUTS.glob("Variables*.xlsx"),
         key=lambda f: f.stat().st_mtime,
         reverse=True,
     )
     if not files:
-        # Fallback to old format
+        # Format encore plus ancien
         files = sorted(
             OUTPUTS.glob("commission_*.xlsx"),
             key=lambda f: f.stat().st_mtime,
@@ -64,8 +73,6 @@ def find_latest_commissions(override: str | None = None) -> list[Path]:
     if not files:
         raise FileNotFoundError("Aucun fichier commission dans outputs/")
         
-    # We group by the modification time roughly (files generated within the same minute)
-    # or just take the top 3 files since we know we generate 3 files recently.
     recent_files = files[:3]
     return recent_files
 
@@ -120,19 +127,35 @@ def build_html_body(date_part: str, file_names: list[str], sync_errors: list[str
                 {files_html}
             </ul>
 
-            <h3 style="color:#2F5496;">Contenu des fichiers :</h3>
+            <h3 style="color:#2F5496;">Contenu du fichier :</h3>
             <table style="border-collapse:collapse;width:100%;">
                 <tr style="background:#2F5496;color:white;">
                     <th style="padding:8px 12px;text-align:left;">Feuille</th>
                     <th style="padding:8px 12px;text-align:left;">Description</th>
                 </tr>
                 <tr style="background:white;">
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>New Add (GADD)</strong></td>
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Détail des commissions GADD par agent</td>
+                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>BA Animation (GADD)</strong></td>
+                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Commissions GADD — BA Animation</td>
                 </tr>
                 <tr style="background:#f2f2f2;">
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>New UserData (ADS)</strong></td>
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Détail des commissions ADS par agent</td>
+                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>BA Animation (ADS)</strong></td>
+                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Commissions ADS — BA Animation</td>
+                </tr>
+                <tr style="background:white;">
+                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>BA Class. &amp; AGENCE (GADD)</strong></td>
+                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Commissions GADD — BA Classiques &amp; BA Agence</td>
+                </tr>
+                <tr style="background:#f2f2f2;">
+                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>BA Class. &amp; AGENCE (ADS)</strong></td>
+                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Commissions ADS — BA Classiques &amp; BA Agence</td>
+                </tr>
+                <tr style="background:white;">
+                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>MA Acquisition (GADD)</strong></td>
+                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Commissions GADD — MA Acquisition</td>
+                </tr>
+                <tr style="background:#f2f2f2;">
+                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>MA Acquisition (ADS)</strong></td>
+                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Commissions ADS — MA Acquisition</td>
                 </tr>
             </table>
 
@@ -182,11 +205,14 @@ def send_email(file_paths: list[Path], recipient: str):
         print("Aucun fichier à envoyer.")
         return
 
-    # Use the date part from the first file (assuming they all share the same date range)
+    # Extraction de la plage de dates depuis le nom du fichier
+    import re
     stem = file_paths[0].stem
-    
-    # Simple extraction logic of dates string
-    date_part = stem.split(" ", 2)[-1] if " " in stem else stem
+    m = re.search(r'(\d{2}-\d{2}-\d{4})\s*-\s*(\d{2}-\d{2}-\d{4})', stem)
+    if m:
+        date_part = f"Acquisition {m.group(1)} - {m.group(2)}"
+    else:
+        date_part = stem.split(" ", 2)[-1] if " " in stem else stem
         
     subject = COMMISSION_SUBJECT_TPL.format(date=date_part)
 
