@@ -73,9 +73,51 @@ def fetch_data(engine, view_name, val_col, comm_col, date_start, date_end):
     with engine.connect() as conn:
         return pd.read_sql(sql, conn, params={"ds": date_start, "de": date_end})
 
-def pivot_data(df, qty_label="Add"):
+def get_active_periods(engine, date_start, date_end, group_channels=None):
+    where_clauses = ["date_debut <= :de", "date_fin >= :ds"]
+    params = {"ds": date_start, "de": date_end}
+
+    if group_channels:
+        channel_params = []
+        for idx, channel in enumerate(group_channels):
+            key = f"channel_{idx}"
+            channel_params.append(f":{key}")
+            params[key] = channel
+        where_clauses.append(f"type_agent IN ({', '.join(channel_params)})")
+
+    sql = text(f"""
+        SELECT
+            periode_nom,
+            MIN(COALESCE(jour_debut, 99)) AS jour_debut,
+            MIN(COALESCE(jour_fin, 99)) AS jour_fin
+        FROM commission_tarifs
+        WHERE {' AND '.join(where_clauses)}
+        GROUP BY periode_nom
+        ORDER BY jour_debut, jour_fin, periode_nom
+    """)
+
+    with engine.connect() as conn:
+        rows = conn.execute(sql, params).fetchall()
+
+    ordered_rows = sorted(
+        rows,
+        key=lambda row: (
+            8 if row[1] == 1 else row[1],
+            8 if row[2] == 1 else row[2],
+            row[0],
+        ),
+    )
+
+    return [row[0] for row in ordered_rows if row[0]]
+
+def pivot_data(df, periods, qty_label="Add"):
     if df.empty:
         return pd.DataFrame()
+
+    active_periods = periods or [
+        period for period in df['periode_nom'].dropna().unique().tolist()
+        if period and period != 'Autre'
+    ]
 
     records = []
     group_cols = ['user_name', 'nom_prenom_superviseur', 'agent_name', 'msisdn_momo', 'real_channel']
@@ -92,7 +134,7 @@ def pivot_data(df, qty_label="Add"):
             'TOTAL A PAYER': group['amt_total'].sum()
         }
 
-        for p in ['Semaine', 'Dimanche']:
+        for p in active_periods:
             s_group = group[group['periode_nom'] == p]
             if not s_group.empty:
                 r[f'{qty_label} {p}'] = s_group['nb_total'].sum()
@@ -107,9 +149,9 @@ def pivot_data(df, qty_label="Add"):
     cols = [
         'USER NAME', 'Superviseur', 'AGENT_NAME', 'MSISDN', 'CANAL',
         f'TOTAL {qty_label}', 'TOTAL A PAYER',
-        f'{qty_label} Semaine', 'Mnt Semaine',
-        f'{qty_label} Dimanche', 'Mnt Dimanche'
     ]
+    for period in active_periods:
+        cols.extend([f'{qty_label} {period}', f'Mnt {period}'])
 
     for col in cols:
         if col not in res_df.columns:
@@ -117,7 +159,7 @@ def pivot_data(df, qty_label="Add"):
             
     return res_df[cols].sort_values(by='TOTAL A PAYER', ascending=False)
 
-def build_tariff_grid(engine, group_channels, data_type, date_ref):
+def build_tariff_grid(engine, group_channels, data_type, date_ref, periods):
     table_col = "taux_gadd" if "Add" in data_type else "taux_ads"
     ch = ", ".join([f"'{c}'" for c in group_channels])
     
@@ -128,7 +170,7 @@ def build_tariff_grid(engine, group_channels, data_type, date_ref):
           AND :d BETWEEN date_debut AND date_fin
         GROUP BY periode_nom
     """)
-    row = {'Semaine': 0, 'Dimanche': 0}
+    row = {period: 0 for period in periods}
     with engine.connect() as conn:
         res = conn.execute(sql, {"d": date_ref}).fetchall()
         for r in res:
@@ -138,7 +180,7 @@ def build_tariff_grid(engine, group_channels, data_type, date_ref):
                 row[p] = val
     return [row]
 
-def write_sheet(wb, sheet_name, df_pivot, date_start, date_end, data_type="GADD", engine=None, group_channels=None):
+def write_sheet(wb, sheet_name, df_pivot, date_start, date_end, periods, data_type="GADD", engine=None, group_channels=None):
     ws = wb.create_sheet(sheet_name)
     if df_pivot.empty:
         ws.cell(1, 1, f"Pas de données pour {data_type}")
@@ -149,18 +191,17 @@ def write_sheet(wb, sheet_name, df_pivot, date_start, date_end, data_type="GADD"
     ws.cell(2, 1, f"Au {format_date_fr(date_end)}").font = Font(bold=True, italic=True)
 
     # 2. MINI-TABLEAU TARIFAIRE (Commence à la colonne 2)
-    t_headers = ["PU Semaine", "PU Weekend", "PU Dimanche"]
-    t_keys = ["Semaine", "Weekend", "Dimanche"]
+    t_headers = [f"PU {period}" for period in periods]
     
     # Récupération des données tarifs (uniquement si un groupe de canaux est fourni)
     if group_channels:
-        tariffs = build_tariff_grid(engine, group_channels, data_type, date_end)
+        tariffs = build_tariff_grid(engine, group_channels, data_type, date_end, periods)
         item = tariffs[0] if tariffs else {}
     else:
         item = {}  # Pas de grille tarifaire pour les feuilles combinées
 
     # Filtrage : On ne garde que les tarifs > 0
-    active_pairs = [(h, k) for h, k in zip(t_headers, t_keys) if item.get(k, 0) > 0]
+    active_pairs = [(header, period) for header, period in zip(t_headers, periods) if item.get(period, 0) > 0]
     
     for idx, (h, k) in enumerate(active_pairs, 2): # Colonne B (2) et suivantes
         # En-tête
@@ -325,6 +366,8 @@ def main():
         "BA Classiques & BA AGENCE": ["BA CLASSIQUE", "BA_AGENCE"],
         "MA Acquisition": ["MA"]
     }
+    all_group_channels = sorted({channel for channels in FILE_GROUPS.values() for channel in channels})
+    active_periods = get_active_periods(engine, date_start, date_end, all_group_channels)
 
     OUTPUTS.mkdir(exist_ok=True)
 
@@ -341,9 +384,9 @@ def main():
         df_a_grp = df_ads_raw[df_ads_raw['real_channel'].isin(group_channels)].copy()  if not df_ads_raw.empty  else pd.DataFrame()
 
         if not df_g_grp.empty:
-            gadd_frames.append(pivot_data(df_g_grp, qty_label="Add"))
+            gadd_frames.append(pivot_data(df_g_grp, active_periods, qty_label="Add"))
         if not df_a_grp.empty:
-            ads_frames.append(pivot_data(df_a_grp, qty_label="ADS"))
+            ads_frames.append(pivot_data(df_a_grp, active_periods, qty_label="ADS"))
 
     df_all_gadd = (
         pd.concat(gadd_frames, ignore_index=True)
@@ -358,9 +401,9 @@ def main():
         if ads_frames else pd.DataFrame()
     )
 
-    write_sheet(wb, "GADD", df_all_gadd, date_start, date_end, "Tous - GADD",
+    write_sheet(wb, "GADD", df_all_gadd, date_start, date_end, active_periods, "Tous - GADD",
                 engine=engine, group_channels=None)
-    write_sheet(wb, "ADS (New Users)", df_all_ads, date_start, date_end, "Tous - ADS",
+    write_sheet(wb, "ADS (New Users)", df_all_ads, date_start, date_end, active_periods, "Tous - ADS",
                 engine=engine, group_channels=None)
 
     print("\n✅ Feuilles ajoutées : GADD, ADS (New Users)")
