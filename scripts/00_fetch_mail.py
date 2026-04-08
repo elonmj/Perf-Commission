@@ -173,6 +173,8 @@ def fetch_attachment(target_date: datetime | None = None) -> Path | None:
         all_parts = get_all_parts(message.get("payload", {}))
         for part in all_parts:
             filename = part.get("filename")
+            if filename:
+                print(f"  [DEBUG] Fichier vu dans le mail : '{filename}'")
             if not filename or not filename.lower().endswith(".xlsx"):
                 continue
 
