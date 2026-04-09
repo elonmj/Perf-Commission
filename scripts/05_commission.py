@@ -6,8 +6,10 @@ Design UX Mobile-first avec en-tête figé, matrice tarifaire et colonnes épur�
 
 import sys
 import argparse
+import json
+from collections import Counter
 from pathlib import Path
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 import pandas as pd
 from sqlalchemy import text
@@ -16,10 +18,12 @@ from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
 ROOT = Path(__file__).parent.parent
 OUTPUTS = ROOT / "outputs"
+LOGS = ROOT / "logs"
+COMMISSION_STATE_FILE = LOGS / "commission_retry_state.json"
 
 sys.path.insert(0, str(ROOT))
 from connections.config import (
-    MYSQL_DATABASE, TABLE_DAILY_GADD,
+    MYSQL_DATABASE, TABLE_DAILY_GADD, TABLE_DAILY_ADS,
     AUTO_MODE, AUTO_DAYS_RANGE, MANUAL_END_DATE, MANUAL_RANGE_DAYS,
 )
 from connections.connect import make_engine
@@ -37,12 +41,103 @@ THIN_BORDER  = Border(
     top=Side(style="thin"), bottom=Side(style="thin"),
 )
 CURRENCY_FMT = '#,##0'
+IDENTITY_COLUMNS = ['USER NAME', 'Superviseur', 'AGENT_NAME', 'MSISDN', 'CANAL']
 
 # ─── HELPERS ───────────────────────────────────────────────────────────────────
 def format_date_fr(d: date) -> str:
     jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
     mois = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"]
     return f"{jours[d.weekday()]} {d.day} {mois[d.month-1]} {d.year}"
+
+def format_day_header_fr(d: date) -> str:
+    jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+    mois = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"]
+    return f"{jours[d.weekday()]} {d.day} {mois[d.month-1]}"
+
+def iter_dates(date_start: date, date_end: date):
+    current = date_start
+    while current <= date_end:
+        yield current
+        current += timedelta(days=1)
+
+def load_commission_state():
+    if not COMMISSION_STATE_FILE.exists():
+        return {"pending_retries": []}
+
+    try:
+        return json.loads(COMMISSION_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"pending_retries": []}
+
+def save_commission_state(state):
+    LOGS.mkdir(exist_ok=True)
+
+    seen = set()
+    pending_retries = []
+    for item in state.get("pending_retries", []):
+        retry_date = item.get("date")
+        metric = item.get("metric")
+        if not retry_date or not metric:
+            continue
+        key = (retry_date, metric)
+        if key in seen:
+            continue
+        seen.add(key)
+        pending_retries.append({
+            "date": retry_date,
+            "metric": metric,
+            "reason": item.get("reason", ""),
+        })
+
+    payload = {
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "pending_retries": sorted(
+            pending_retries,
+            key=lambda item: (item["date"], item["metric"]),
+        ),
+    }
+    COMMISSION_STATE_FILE.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=True),
+        encoding="utf-8",
+    )
+
+def find_last_commission_date():
+    import os
+    import re
+
+    pattern_old = r"commission_.*?(\d{4}-\d{2}-\d{2})\.xlsx$"
+    pattern_new = r"Variables .* (\d{2}-\d{2}-\d{4})\.xlsx$"
+    pattern_unified = r"Commission LKA .* (\d{2}-\d{2}-\d{4})\.xlsx$"
+
+    dates_found = []
+    if os.path.exists(OUTPUTS):
+        for filename in os.listdir(OUTPUTS):
+            match_old = re.search(pattern_old, filename)
+            if match_old:
+                dates_found.append(datetime.strptime(match_old.group(1), "%Y-%m-%d").date())
+
+            match_new = re.search(pattern_new, filename)
+            if match_new:
+                dates_found.append(datetime.strptime(match_new.group(1), "%d-%m-%Y").date())
+
+            match_unified = re.search(pattern_unified, filename)
+            if match_unified:
+                dates_found.append(datetime.strptime(match_unified.group(1), "%d-%m-%Y").date())
+
+    return max(dates_found) if dates_found else None
+
+def get_latest_source_date(engine):
+    sql = text(f"""
+        SELECT GREATEST(
+            COALESCE((SELECT MAX(perf_date) FROM {TABLE_DAILY_GADD}), '1900-01-01'),
+            COALESCE((SELECT MAX(perf_date) FROM {TABLE_DAILY_ADS}), '1900-01-01')
+        )
+    """)
+    with engine.connect() as conn:
+        row = conn.execute(sql).fetchone()
+    if not row or not row[0]:
+        return None
+    return pd.to_datetime(row[0]).date()
 
 def auto_width(ws):
     for col in ws.columns:
@@ -61,6 +156,7 @@ def fetch_data(engine, view_name, val_col, comm_col, date_start, date_end):
             agent_name,
             msisdn_momo,
             real_channel,
+            perf_date,
             periode_nom,
             taux_{val_col}_applique AS pu,
             SUM({val_col}) AS nb_total,
@@ -68,10 +164,90 @@ def fetch_data(engine, view_name, val_col, comm_col, date_start, date_end):
         FROM {view_name}
         WHERE perf_date BETWEEN :ds AND :de
         GROUP BY 
-            user_name, superviseur, agent_name, msisdn_momo, real_channel, periode_nom, taux_{val_col}_applique
+            user_name, superviseur, agent_name, msisdn_momo, real_channel, perf_date, periode_nom, taux_{val_col}_applique
     """)
     with engine.connect() as conn:
-        return pd.read_sql(sql, conn, params={"ds": date_start, "de": date_end})
+        df = pd.read_sql(sql, conn, params={"ds": date_start, "de": date_end})
+    if not df.empty:
+        df['perf_date'] = pd.to_datetime(df['perf_date']).dt.date
+    return df
+
+def get_daily_metric_totals(engine, date_start, date_end):
+    totals = {
+        current_date: {"GADD": 0, "ADS": 0}
+        for current_date in iter_dates(date_start, date_end)
+    }
+
+    sql_gadd = text(f"""
+        SELECT perf_date, SUM(gadd) AS total_qty
+        FROM {TABLE_DAILY_GADD}
+        WHERE perf_date BETWEEN :ds AND :de
+        GROUP BY perf_date
+    """)
+    sql_ads = text(f"""
+        SELECT perf_date, SUM(ads) AS total_qty
+        FROM {TABLE_DAILY_ADS}
+        WHERE perf_date BETWEEN :ds AND :de
+        GROUP BY perf_date
+    """)
+
+    with engine.connect() as conn:
+        gadd_rows = conn.execute(sql_gadd, {"ds": date_start, "de": date_end}).fetchall()
+        ads_rows = conn.execute(sql_ads, {"ds": date_start, "de": date_end}).fetchall()
+
+    for perf_date, total_qty in gadd_rows:
+        totals[pd.to_datetime(perf_date).date()]["GADD"] = int(total_qty or 0)
+    for perf_date, total_qty in ads_rows:
+        totals[pd.to_datetime(perf_date).date()]["ADS"] = int(total_qty or 0)
+
+    return totals
+
+def detect_pending_retries(daily_totals):
+    pending = []
+    for perf_date, totals in sorted(daily_totals.items()):
+        gadd_total = totals.get("GADD", 0)
+        ads_total = totals.get("ADS", 0)
+
+        if gadd_total > 0 and ads_total == 0:
+            pending.append({
+                "date": perf_date.isoformat(),
+                "metric": "ADS",
+                "reason": "ADS total a 0 alors que GADD est positif",
+            })
+        elif ads_total > 0 and gadd_total == 0:
+            pending.append({
+                "date": perf_date.isoformat(),
+                "metric": "GADD",
+                "reason": "GADD total a 0 alors que ADS est positif",
+            })
+
+    return pending
+
+def refresh_commission_state(engine, date_start, date_end):
+    state = load_commission_state()
+    current_range_dates = {current_date.isoformat() for current_date in iter_dates(date_start, date_end)}
+    remaining_pending = [
+        item for item in state.get("pending_retries", [])
+        if item.get("date") not in current_range_dates
+    ]
+
+    pending_for_current_range = detect_pending_retries(
+        get_daily_metric_totals(engine, date_start, date_end)
+    )
+    remaining_pending.extend(pending_for_current_range)
+    save_commission_state({"pending_retries": remaining_pending})
+    return pending_for_current_range
+
+def load_pending_retry_dates(end_date):
+    pending_dates = []
+    for item in load_commission_state().get("pending_retries", []):
+        try:
+            retry_date = datetime.strptime(item["date"], "%Y-%m-%d").date()
+        except Exception:
+            continue
+        if retry_date <= end_date:
+            pending_dates.append(retry_date)
+    return sorted(set(pending_dates))
 
 def get_active_periods(engine, date_start, date_end, group_channels=None):
     where_clauses = ["date_debut <= :de", "date_fin >= :ds"]
@@ -110,20 +286,113 @@ def get_active_periods(engine, date_start, date_end, group_channels=None):
 
     return [row[0] for row in ordered_rows if row[0]]
 
-def pivot_data(df, periods, qty_label="Add"):
+def get_date_period_map(engine, date_start, date_end, group_channels=None, frames=None):
+    frames = frames or []
+    date_period_map = {}
+
+    for frame in frames:
+        if frame is None or frame.empty or 'perf_date' not in frame.columns or 'periode_nom' not in frame.columns:
+            continue
+
+        temp = frame[['perf_date', 'periode_nom']].copy()
+        temp['perf_date'] = pd.to_datetime(temp['perf_date']).dt.date
+        temp['periode_nom'] = temp['periode_nom'].fillna('').astype(str).str.strip()
+        temp = temp[temp['periode_nom'] != '']
+        temp = temp[temp['periode_nom'] != 'Autre']
+
+        if temp.empty:
+            continue
+
+        for perf_date, values in temp.groupby('perf_date')['periode_nom']:
+            periods = sorted(set(values.tolist()))
+            if periods:
+                date_period_map[perf_date] = " / ".join(periods)
+
+    if len(date_period_map) == len(list(iter_dates(date_start, date_end))):
+        return date_period_map
+
+    where_clauses = ["date_debut <= :de", "date_fin >= :ds"]
+    params = {"ds": date_start, "de": date_end}
+
+    if group_channels:
+        channel_params = []
+        for idx, channel in enumerate(group_channels):
+            key = f"period_channel_{idx}"
+            channel_params.append(f":{key}")
+            params[key] = channel
+        where_clauses.append(f"type_agent IN ({', '.join(channel_params)})")
+
+    sql = text(f"""
+        SELECT DISTINCT periode_nom, date_debut, date_fin, jour_debut, jour_fin
+        FROM commission_tarifs
+        WHERE {' AND '.join(where_clauses)}
+    """)
+
+    with engine.connect() as conn:
+        rows = conn.execute(sql, params).fetchall()
+
+    for current_date in iter_dates(date_start, date_end):
+        if current_date in date_period_map:
+            continue
+
+        matched_periods = []
+        mysql_day = ((current_date.weekday() + 1) % 7) + 1
+        for periode_nom, date_debut, date_fin, jour_debut, jour_fin in rows:
+            if not (date_debut <= current_date <= date_fin):
+                continue
+            if jour_debut is None or jour_fin is None:
+                matched_periods.append(periode_nom)
+                continue
+            if jour_debut <= mysql_day <= jour_fin:
+                matched_periods.append(periode_nom)
+
+        matched_periods = sorted(set([period for period in matched_periods if period]))
+        date_period_map[current_date] = " / ".join(matched_periods) if matched_periods else "Autre"
+
+    return date_period_map
+
+def build_period_blocks(day_dates, date_period_map):
+    blocks = []
+    current_period = None
+    current_dates = []
+
+    for day_date in day_dates:
+        period_name = date_period_map.get(day_date, 'Autre')
+        if current_period is None or period_name == current_period:
+            current_period = period_name
+            current_dates.append(day_date)
+            continue
+
+        blocks.append({"period": current_period, "dates": current_dates})
+        current_period = period_name
+        current_dates = [day_date]
+
+    if current_dates:
+        blocks.append({"period": current_period, "dates": current_dates})
+
+    period_counts = Counter(block['period'] for block in blocks)
+    seen_counts = {}
+    for block in blocks:
+        period_name = block['period']
+        seen_counts[period_name] = seen_counts.get(period_name, 0) + 1
+        suffix = "" if period_counts[period_name] == 1 else f" {seen_counts[period_name]}"
+        block['total_label'] = f"TOTAL {period_name}{suffix}"
+        block['amount_label'] = f"Mnt {period_name}{suffix}"
+
+    return blocks
+
+def pivot_data(df, day_dates, period_blocks, qty_label="Add"):
     if df.empty:
         return pd.DataFrame()
-
-    active_periods = periods or [
-        period for period in df['periode_nom'].dropna().unique().tolist()
-        if period and period != 'Autre'
-    ]
 
     records = []
     group_cols = ['user_name', 'nom_prenom_superviseur', 'agent_name', 'msisdn_momo', 'real_channel']
     grouped = df.groupby(group_cols, dropna=False)
 
     for name, group in grouped:
+        group = group.copy()
+        group['perf_date'] = pd.to_datetime(group['perf_date']).dt.date
+
         r = {
             'USER NAME': name[0],
             'Superviseur': name[1],
@@ -134,24 +403,25 @@ def pivot_data(df, periods, qty_label="Add"):
             'TOTAL A PAYER': group['amt_total'].sum()
         }
 
-        for p in active_periods:
-            s_group = group[group['periode_nom'] == p]
-            if not s_group.empty:
-                r[f'{qty_label} {p}'] = s_group['nb_total'].sum()
-                r[f'Mnt {p}'] = s_group['amt_total'].sum()
-            else:
-                r[f'{qty_label} {p}'] = 0
-                r[f'Mnt {p}'] = 0
+        for day_date in day_dates:
+            day_label = format_day_header_fr(day_date)
+            day_group = group[group['perf_date'] == day_date]
+            r[day_label] = day_group['nb_total'].sum() if not day_group.empty else 0
+
+        for block in period_blocks:
+            block_group = group[group['perf_date'].isin(block['dates'])]
+            r[block['total_label']] = block_group['nb_total'].sum() if not block_group.empty else 0
+            r[block['amount_label']] = block_group['amt_total'].sum() if not block_group.empty else 0
 
         records.append(r)
         
     res_df = pd.DataFrame(records)
-    cols = [
-        'USER NAME', 'Superviseur', 'AGENT_NAME', 'MSISDN', 'CANAL',
-        f'TOTAL {qty_label}', 'TOTAL A PAYER',
-    ]
-    for period in active_periods:
-        cols.extend([f'{qty_label} {period}', f'Mnt {period}'])
+    cols = IDENTITY_COLUMNS.copy()
+    for block in period_blocks:
+        for day_date in block['dates']:
+            cols.append(format_day_header_fr(day_date))
+        cols.extend([block['total_label'], block['amount_label']])
+    cols.extend([f'TOTAL {qty_label}', 'TOTAL A PAYER'])
 
     for col in cols:
         if col not in res_df.columns:
@@ -232,7 +502,7 @@ def write_sheet(wb, sheet_name, df_pivot, date_start, date_end, periods, data_ty
     currency_cols = [h for h in headers if h.startswith("Mnt") or h == "TOTAL A PAYER"]
     cur_indices = [headers.index(x)+1 for x in currency_cols]
     
-    qty_cols = [h for h in headers if h.startswith("Add") or h.startswith("ADS") or h.startswith("TOTAL Add") or h.startswith("TOTAL ADS")]
+    qty_cols = [h for h in headers if h not in IDENTITY_COLUMNS and h not in currency_cols]
     qty_indices = [headers.index(x)+1 for x in qty_cols]
 
     # 4. ÉCRITURE DES LIGNES
@@ -282,9 +552,6 @@ def write_sheet(wb, sheet_name, df_pivot, date_start, date_end, periods, data_ty
 
 def resolve_date_range(engine, args):
     """Determine la plage de dates selon : args CLI > config.py > extractions outputs."""
-    from datetime import timedelta
-    import re
-    import os
 
     # 1. Arguments CLI explicites (prioritaires)
     if args.week:
@@ -296,47 +563,28 @@ def resolve_date_range(engine, args):
 
     # 2. Config BI (AUTO_MODE ou MANUAL)
     if AUTO_MODE:
-        with engine.connect() as conn:
-            row = conn.execute(text(f"SELECT MAX(perf_date) FROM {TABLE_DAILY_GADD}")).fetchone()
-        if not row or not row[0]:
-            print("Aucune donnee dans daily_gadd.")
+        end = get_latest_source_date(engine)
+        if not end:
+            print("Aucune donnee dans les tables journalieres.")
             sys.exit(1)
-        end = row[0]
-        
-        # Trouver la dernière date traitée dans les fichiers du répertoire outputs/
-        pattern_old = r"commission_.*?(\d{4}-\d{2}-\d{2})\.xlsx$"
-        pattern_new = r"Variables .* (\d{2}-\d{2}-\d{4})\.xlsx$"
-        pattern_unified = r"Commission LKA .* (\d{2}-\d{2}-\d{4})\.xlsx$"
-        
-        dates_trouvees = []
-        if os.path.exists(OUTPUTS):
-            for f in os.listdir(OUTPUTS):
-                # Ancien format
-                m_old = re.search(pattern_old, f)
-                if m_old:
-                    dates_trouvees.append(datetime.strptime(m_old.group(1), "%Y-%m-%d").date())
-                
-                # Ancien format multi-fichier
-                m_new = re.search(pattern_new, f)
-                if m_new:
-                    dates_trouvees.append(datetime.strptime(m_new.group(1), "%d-%m-%Y").date())
 
-                # Format unifié (fichier unique)
-                m_uni = re.search(pattern_unified, f)
-                if m_uni:
-                    dates_trouvees.append(datetime.strptime(m_uni.group(1), "%d-%m-%Y").date())
-                    
-        if dates_trouvees:
-            last_comm_date = max(dates_trouvees)
+        last_comm_date = find_last_commission_date()
+        if last_comm_date:
             dyn_start = last_comm_date + timedelta(days=1)
-            
-            if dyn_start > end:
-                start = end
-            else:
-                start = dyn_start
+            start = end if dyn_start > end else dyn_start
         else:
             # Fallback global si aucun fichier de commission précédent n'existe
             start = end - timedelta(days=AUTO_DAYS_RANGE - 1)
+
+        pending_retry_dates = load_pending_retry_dates(end)
+        if pending_retry_dates:
+            retry_start = min(pending_retry_dates)
+            if retry_start < start:
+                print(
+                    f"⚠ Reprise automatique depuis {format_date_fr(retry_start)} "
+                    f"pour rejouer un jour precedemment incomplet."
+                )
+                start = retry_start
 
         return (start, end)
     else:
@@ -368,6 +616,15 @@ def main():
     }
     all_group_channels = sorted({channel for channels in FILE_GROUPS.values() for channel in channels})
     active_periods = get_active_periods(engine, date_start, date_end, all_group_channels)
+    day_dates = list(iter_dates(date_start, date_end))
+    date_period_map = get_date_period_map(
+        engine,
+        date_start,
+        date_end,
+        all_group_channels,
+        frames=[df_gadd_raw, df_ads_raw],
+    )
+    period_blocks = build_period_blocks(day_dates, date_period_map)
 
     OUTPUTS.mkdir(exist_ok=True)
 
@@ -384,9 +641,9 @@ def main():
         df_a_grp = df_ads_raw[df_ads_raw['real_channel'].isin(group_channels)].copy()  if not df_ads_raw.empty  else pd.DataFrame()
 
         if not df_g_grp.empty:
-            gadd_frames.append(pivot_data(df_g_grp, active_periods, qty_label="Add"))
+            gadd_frames.append(pivot_data(df_g_grp, day_dates, period_blocks, qty_label="Add"))
         if not df_a_grp.empty:
-            ads_frames.append(pivot_data(df_a_grp, active_periods, qty_label="ADS"))
+            ads_frames.append(pivot_data(df_a_grp, day_dates, period_blocks, qty_label="ADS"))
 
     df_all_gadd = (
         pd.concat(gadd_frames, ignore_index=True)
@@ -405,6 +662,11 @@ def main():
                 engine=engine, group_channels=None)
     write_sheet(wb, "ADS (New Users)", df_all_ads, date_start, date_end, active_periods, "Tous - ADS",
                 engine=engine, group_channels=None)
+
+    pending_retries = refresh_commission_state(engine, date_start, date_end)
+    if pending_retries:
+        retry_text = ", ".join(f"{item['metric']} {item['date']}" for item in pending_retries)
+        print(f"\n⚠ Reprise automatique programmee pour : {retry_text}")
 
     print("\n✅ Feuilles ajoutées : GADD, ADS (New Users)")
 
