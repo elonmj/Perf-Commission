@@ -32,6 +32,7 @@ INPUTS = ROOT / "inputs"
 CREDS_FILE = ROOT / "connections" / "credentials.json"
 TOKEN_FILE = ROOT / "connections" / "token.json"
 PROCESSED_IDS_FILE = ROOT / "data" / "processed_mail_ids.json"
+MAIL_QUERY = 'subject:(PERFORMANCE OR PERFORMANCES) subject:(GLOBALE OR GLOBALES)'
 
 # Lecture (scopes)
 SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
@@ -101,6 +102,44 @@ def get_gmail_service():
     return build("gmail", "v1", credentials=creds)
 
 
+def list_matching_messages(service, max_results: int = 20) -> list[dict]:
+    """Retourne les mails Gmail correspondant au sujet attendu, du plus recent au plus ancien."""
+    print(f"  Recherche : [{MAIL_QUERY}]")
+
+    max_retries = 3
+    results = {}
+    for attempt in range(1, max_retries + 1):
+        try:
+            results = (
+                service.users()
+                .messages()
+                .list(userId="me", q=MAIL_QUERY, maxResults=max_results)
+                .execute()
+            )
+            break
+        except Exception as e:
+            if attempt == max_retries:
+                raise RuntimeError(
+                    f"API Gmail injoignable apres {max_retries} tentatives : {e}"
+                ) from e
+            print(
+                "  [Reseau] Instabilite avec Google. "
+                f"Nouvelle tentative ({attempt}/{max_retries}) dans 10 secondes..."
+            )
+            time.sleep(10)
+
+    return results.get("messages", [])
+
+
+def get_latest_matching_message() -> dict | None:
+    """Retourne le mail Gmail le plus recent correspondant au sujet attendu."""
+    service = get_gmail_service()
+    messages = list_matching_messages(service, max_results=1)
+    if not messages:
+        return None
+    return messages[0]
+
+
 def fetch_attachment(target_date: datetime | None = None) -> Path | None:
     """
     Cherche le mail PERFORMANCE GLOBALE non-lu via l'API Gmail
@@ -119,27 +158,11 @@ def fetch_attachment(target_date: datetime | None = None) -> Path | None:
     service = get_gmail_service()
     print("  Authentification API Gmail réussie.")
 
-    # Recherche ultra-souple : tolère les "S" finaux et la mention "FW:"
-    query = 'subject:(PERFORMANCE OR PERFORMANCES) subject:(GLOBALE OR GLOBALES)'
-    print(f"  Recherche : [{query}]")
-
-    # Retry logic pour pallier aux instabilités réseau du serveur
-    max_retries = 3
-    results = {}
-    for attempt in range(1, max_retries + 1):
-        try:
-            results = (
-                service.users().messages().list(userId="me", q=query, maxResults=20).execute()
-            )
-            break
-        except Exception as e:
-            if attempt == max_retries:
-                print(f"  [Erreur Réseau] API Gmail injoignable après {max_retries} tentatives : {e}")
-                sys.exit(1)
-            print(f"  [Réseau] Instabilité avec Google. Nouvelle tentative ({attempt}/{max_retries}) dans 10 secondes...")
-            time.sleep(10)
-
-    messages = results.get("messages", [])
+    try:
+        messages = list_matching_messages(service, max_results=20)
+    except RuntimeError as exc:
+        print(f"  [Erreur Réseau] {exc}")
+        sys.exit(1)
 
     if not messages:
         print("  Aucun mail trouvé avec ce sujet.")

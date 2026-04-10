@@ -26,6 +26,7 @@ import argparse
 import smtplib
 import traceback
 import json
+import importlib.util
 from email.mime.text import MIMEText
 from pathlib import Path
 from datetime import datetime, date
@@ -114,16 +115,50 @@ def get_resume_steps(steps: list, mail_id: str | None, state: dict) -> list:
 
     return steps_wo_fetch
 
+
+def load_fetch_mail_module():
+    spec = importlib.util.spec_from_file_location(
+        "fetch_mail_module",
+        ROOT / "scripts" / "00_fetch_mail.py",
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Impossible de charger scripts/00_fetch_mail.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def has_unprocessed_latest_mail(processed_state: dict) -> bool:
+    """Retourne True si le dernier mail Gmail correspondant n'a pas encore ete traite avec succes."""
+    try:
+        fetch_mail = load_fetch_mail_module()
+        latest_message = fetch_mail.get_latest_matching_message()
+    except Exception as exc:
+        print(f"  [Check Mail] Controle Gmail impossible, skip du rerun mail: {exc}")
+        return False
+
+    if not latest_message:
+        return False
+
+    latest_id = latest_message.get("id")
+    latest_meta = processed_state.get(latest_id, {}) if latest_id else {}
+    latest_status = latest_meta.get("status") if isinstance(latest_meta, dict) else None
+
+    if latest_status == "success":
+        return False
+
+    print(f"  [Check Mail] Nouveau mail ou mail non finalise detecte: {latest_id}")
+    return True
+
 def has_pending_retries() -> bool:
     """Verifie s'il y a des jours/metrics en attente de reprise."""
     try:
-        from scripts import commission_05_module
-        import importlib.util
-        import pathlib
         spec = importlib.util.spec_from_file_location(
             "commission05",
-            pathlib.Path(__file__).parent / "scripts" / "05_commission.py"
+            ROOT / "scripts" / "05_commission.py",
         )
+        if spec is None or spec.loader is None:
+            return False
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         state = mod.load_commission_state()
@@ -131,7 +166,7 @@ def has_pending_retries() -> bool:
     except Exception:
         return False
 
-def already_done_today() -> bool:
+def already_done_today(processed_state: dict, check_new_mail: bool = True) -> bool:
     if not FLAG_PATH.exists():
         return False
     content = FLAG_PATH.read_text().strip()
@@ -141,6 +176,8 @@ def already_done_today() -> bool:
     # Si le flag est d'aujourd'hui mais qu'il y a des retries en attente,
     # permettre la relance intra-jour pour rejouer les jours anomaliques
     if has_pending_retries():
+        return False
+    if check_new_mail and has_unprocessed_latest_mail(processed_state):
         return False
     return True
 
@@ -259,7 +296,7 @@ def main():
         print(f"  [Reprise] Mail pending detecte: {current_mail_id} (dernier step OK: {last_step})")
 
     # Verifier le flag
-    if not args.force and already_done_today():
+    if not args.force and already_done_today(processed_state, check_new_mail=not args.skip_fetch):
         print(f"  Pipeline deja execute aujourd'hui ({date.today()}).")
         print(f"  Utilisez --force pour relancer.")
         sys.exit(0)
