@@ -69,12 +69,29 @@ def load_commission_state():
     except Exception:
         return {"pending_retries": []}
 
+
+def parse_state_date(value):
+    if not value:
+        return None
+    if isinstance(value, date):
+        return value
+    try:
+        return pd.to_datetime(value).date()
+    except Exception:
+        return None
+
 def save_commission_state(state):
     LOGS.mkdir(exist_ok=True)
 
+    existing_state = load_commission_state()
+
     seen = set()
     pending_retries = []
-    for item in state.get("pending_retries", []):
+    raw_pending_retries = state.get(
+        "pending_retries",
+        existing_state.get("pending_retries", []),
+    )
+    for item in raw_pending_retries:
         retry_date = item.get("date")
         metric = item.get("metric")
         if not retry_date or not metric:
@@ -96,10 +113,131 @@ def save_commission_state(state):
             key=lambda item: (item["date"], item["metric"]),
         ),
     }
+
+    anchor = state.get("daily_recompute_anchor", existing_state.get("daily_recompute_anchor"))
+    if isinstance(anchor, dict):
+        processing_day = anchor.get("processing_day")
+        start_date = parse_state_date(anchor.get("start_date"))
+        end_date = parse_state_date(anchor.get("end_date"))
+        if processing_day and start_date:
+            payload["daily_recompute_anchor"] = {
+                "processing_day": processing_day,
+                "start_date": start_date.isoformat(),
+            }
+            if end_date:
+                payload["daily_recompute_anchor"]["end_date"] = end_date.isoformat()
+
+    last_mail_context = state.get("last_mail_context", existing_state.get("last_mail_context"))
+    if isinstance(last_mail_context, dict):
+        source_start_date = parse_state_date(last_mail_context.get("source_start_date"))
+        source_end_date = parse_state_date(last_mail_context.get("source_end_date"))
+        commission_start_date = parse_state_date(last_mail_context.get("commission_start_date"))
+        commission_end_date = parse_state_date(last_mail_context.get("commission_end_date"))
+        if source_start_date and source_end_date and commission_start_date and commission_end_date:
+            payload["last_mail_context"] = {
+                "source_start_date": source_start_date.isoformat(),
+                "source_end_date": source_end_date.isoformat(),
+                "commission_start_date": commission_start_date.isoformat(),
+                "commission_end_date": commission_end_date.isoformat(),
+            }
+
     COMMISSION_STATE_FILE.write_text(
         json.dumps(payload, indent=2, ensure_ascii=True),
         encoding="utf-8",
     )
+
+
+def load_daily_recompute_anchor(processing_day: date | None = None):
+    processing_day = processing_day or date.today()
+    anchor = load_commission_state().get("daily_recompute_anchor", {})
+    if not isinstance(anchor, dict):
+        return None
+    if anchor.get("processing_day") != processing_day.isoformat():
+        return None
+    return parse_state_date(anchor.get("start_date"))
+
+
+def update_daily_recompute_anchor(start_date: date, end_date: date, processing_day: date | None = None):
+    processing_day = processing_day or date.today()
+    existing_start = load_daily_recompute_anchor(processing_day)
+    if existing_start and existing_start < start_date:
+        start_date = existing_start
+
+    save_commission_state({
+        "daily_recompute_anchor": {
+            "processing_day": processing_day.isoformat(),
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+        }
+    })
+    return start_date
+
+
+def load_last_mail_context():
+    raw_context = load_commission_state().get("last_mail_context", {})
+    if not isinstance(raw_context, dict):
+        return None
+
+    source_start_date = parse_state_date(raw_context.get("source_start_date"))
+    source_end_date = parse_state_date(raw_context.get("source_end_date"))
+    commission_start_date = parse_state_date(raw_context.get("commission_start_date"))
+    commission_end_date = parse_state_date(raw_context.get("commission_end_date"))
+
+    if not all([source_start_date, source_end_date, commission_start_date, commission_end_date]):
+        return None
+
+    return {
+        "source_start_date": source_start_date,
+        "source_end_date": source_end_date,
+        "commission_start_date": commission_start_date,
+        "commission_end_date": commission_end_date,
+    }
+
+
+def get_processed_source_range(processing_day: date | None = None):
+    processing_day = processing_day or date.today()
+    suffix = processing_day.strftime("%Y-%m-%d")
+    candidate_files = [
+        OUTPUTS / f"gadd_long_{suffix}.xlsx",
+        OUTPUTS / f"ads_long_{suffix}.xlsx",
+    ]
+
+    all_dates = []
+    for path in candidate_files:
+        if not path.exists():
+            continue
+        try:
+            df = pd.read_excel(path, usecols=["perf_date"])
+        except Exception:
+            continue
+        if "perf_date" not in df.columns:
+            continue
+        parsed_dates = pd.to_datetime(df["perf_date"], errors="coerce").dropna()
+        all_dates.extend(parsed_dates.dt.date.tolist())
+
+    if not all_dates:
+        return None
+
+    return {
+        "source_start_date": min(all_dates),
+        "source_end_date": max(all_dates),
+    }
+
+
+def save_last_mail_context(commission_start_date: date, commission_end_date: date, processing_day: date | None = None):
+    current_source_range = get_processed_source_range(processing_day)
+    if not current_source_range:
+        return None
+
+    save_commission_state({
+        "last_mail_context": {
+            "source_start_date": current_source_range["source_start_date"].isoformat(),
+            "source_end_date": current_source_range["source_end_date"].isoformat(),
+            "commission_start_date": commission_start_date.isoformat(),
+            "commission_end_date": commission_end_date.isoformat(),
+        }
+    })
+    return current_source_range
 
 def find_last_commission_date():
     import os
@@ -563,18 +701,44 @@ def resolve_date_range(engine, args):
 
     # 2. Config BI (AUTO_MODE ou MANUAL)
     if AUTO_MODE:
+        processing_day = date.today()
         end = get_latest_source_date(engine)
         if not end:
             print("Aucune donnee dans les tables journalieres.")
             sys.exit(1)
 
-        last_comm_date = find_last_commission_date()
-        if last_comm_date:
-            dyn_start = last_comm_date + timedelta(days=1)
-            start = end if dyn_start > end else dyn_start
+        current_source_range = get_processed_source_range(processing_day)
+        last_mail_context = load_last_mail_context()
+
+        if (
+            current_source_range
+            and last_mail_context
+            and current_source_range["source_start_date"] == last_mail_context["source_start_date"]
+            and current_source_range["source_end_date"] == last_mail_context["source_end_date"]
+        ):
+            start = last_mail_context["commission_start_date"]
+            print(
+                f"♻ Range source identique au dernier mail "
+                f"({format_date_fr(current_source_range['source_start_date'])} -> "
+                f"{format_date_fr(current_source_range['source_end_date'])}) : "
+                f"mise a jour detectee, recalcul depuis {format_date_fr(start)}."
+            )
         else:
-            # Fallback global si aucun fichier de commission précédent n'existe
-            start = end - timedelta(days=AUTO_DAYS_RANGE - 1)
+            last_comm_date = find_last_commission_date()
+            if last_comm_date:
+                dyn_start = last_comm_date + timedelta(days=1)
+                start = end if dyn_start > end else dyn_start
+            else:
+                # Fallback global si aucun fichier de commission précédent n'existe
+                start = end - timedelta(days=AUTO_DAYS_RANGE - 1)
+
+        daily_anchor_start = load_daily_recompute_anchor(processing_day)
+        if daily_anchor_start and daily_anchor_start < start:
+            print(
+                f"♻ Recalcul du jour conserve depuis {format_date_fr(daily_anchor_start)} "
+                f"pour couvrir toute correction du meme jour."
+            )
+            start = daily_anchor_start
 
         pending_retry_dates = load_pending_retry_dates(end)
         if pending_retry_dates:
@@ -585,6 +749,8 @@ def resolve_date_range(engine, args):
                     f"pour rejouer un jour precedemment incomplet."
                 )
                 start = retry_start
+
+        start = update_daily_recompute_anchor(start, end, processing_day)
 
         return (start, end)
     else:
@@ -673,6 +839,14 @@ def main():
     out_name = f"Commission LKA {date_start.strftime('%d-%m-%Y')} - {date_end.strftime('%d-%m-%Y')}.xlsx"
     out_path = OUTPUTS / out_name
     wb.save(out_path)
+
+    current_source_range = save_last_mail_context(date_start, date_end)
+    if current_source_range:
+        print(
+            "  [Contexte mail] Range source memorise : "
+            f"{format_date_fr(current_source_range['source_start_date'])} -> "
+            f"{format_date_fr(current_source_range['source_end_date'])}"
+        )
     
     print(f"\n✅ Fichier généré : {out_path.name}")
 
