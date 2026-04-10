@@ -98,7 +98,7 @@ python3 run_daily.py --force --skip-send
 ## 10. Installer le cron job
 
 ```bash
-(crontab -l 2>/dev/null | grep -v "perf_commissions" ; echo "10,40 * * * * /opt/perf_commissions/run_server.sh") | crontab -
+(crontab -l 2>/dev/null | grep -v "perf_commissions" ; echo "*/15 * * * * /opt/perf_commissions/run_server.sh") | crontab -
 ```
 
 Verifier :
@@ -107,7 +107,7 @@ Verifier :
 crontab -l
 ```
 
-Attendu : `10,40 * * * * /opt/perf_commissions/run_server.sh`
+Attendu : `*/15 * * * * /opt/perf_commissions/run_server.sh`
 
 ---
 

@@ -3,7 +3,7 @@
 # run_server.sh — Lanceur cron Linux pour le pipeline Perf_commissions
 #
 # Installe via crontab -e :
-#   10,40 * * * * /opt/perf_commissions/run_server.sh >> /dev/null 2>&1
+#   */15 * * * * /opt/perf_commissions/run_server.sh >> /dev/null 2>&1
 #
 # Le script :
 #   1. git pull (applique les MAJ de code poussees sur main)
