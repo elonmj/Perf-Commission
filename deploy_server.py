@@ -46,7 +46,7 @@ SERVER_PORT     = 22
 REMOTE_BASE     = "/opt/perf_commissions"
 REPO_URL        = "https://github.com/elonmj/Perf-Commission.git"
 PYTHON          = "python3"
-CRON_SCHEDULE   = "0 * * * *"  # toutes les heures
+CRON_SCHEDULE   = "*/30 * * * *"  # toutes les 30 minutes
 
 # Fichiers secrets a transferer (local → serveur)
 LOCAL_ENV           = ROOT / ".env"

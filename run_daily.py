@@ -114,11 +114,35 @@ def get_resume_steps(steps: list, mail_id: str | None, state: dict) -> list:
 
     return steps_wo_fetch
 
+def has_pending_retries() -> bool:
+    """Verifie s'il y a des jours/metrics en attente de reprise."""
+    try:
+        from scripts import commission_05_module
+        import importlib.util
+        import pathlib
+        spec = importlib.util.spec_from_file_location(
+            "commission05",
+            pathlib.Path(__file__).parent / "scripts" / "05_commission.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        state = mod.load_commission_state()
+        return bool(state.get("pending_retries", []))
+    except Exception:
+        return False
+
 def already_done_today() -> bool:
     if not FLAG_PATH.exists():
         return False
     content = FLAG_PATH.read_text().strip()
-    return content == str(date.today())
+    is_today = content == str(date.today())
+    if not is_today:
+        return False
+    # Si le flag est d'aujourd'hui mais qu'il y a des retries en attente,
+    # permettre la relance intra-jour pour rejouer les jours anomaliques
+    if has_pending_retries():
+        return False
+    return True
 
 
 def mark_done():
