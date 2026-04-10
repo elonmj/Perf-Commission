@@ -98,7 +98,7 @@ python3 run_daily.py --force --skip-send
 ## 10. Installer le cron job
 
 ```bash
-(crontab -l 2>/dev/null | grep -v "perf_commissions" ; echo "*/30 * * * * /opt/perf_commissions/run_server.sh") | crontab -
+(crontab -l 2>/dev/null | grep -v "perf_commissions" ; echo "10,40 * * * * /opt/perf_commissions/run_server.sh") | crontab -
 ```
 
 Verifier :
@@ -107,22 +107,23 @@ Verifier :
 crontab -l
 ```
 
-Attendu : `*/30 * * * * /opt/perf_commissions/run_server.sh`
+Attendu : `10,40 * * * * /opt/perf_commissions/run_server.sh`
 
 ---
 
 ## Comment ca marche ensuite
 
-| Intervalle | Comportement |
+| Heure | Comportement |
 |-------|----------|
-| 00:00, 00:30 | Cron lance `run_server.sh` → `git pull` + `run_daily.py` |
-| 00:00, 00:30 | `run_daily.py` verifie `last_success.txt` → pas de flag → lance le pipeline |
-| 00:00, 00:30 | Si pas de mail : le script echoue proprement, email d'alerte envoye |
-| 01:00, 01:30 | Cron relance → toujours pas de flag → reessaie |
-| ...   | Repeat chaque 30 min jusqu'a ce que le mail d'Abraham arrive |
-| XX:00 (ou XX:30) | Mail trouve → pipeline complet → `last_success.txt` = date du jour |
-| XX+0:30 (ou XX:30+0:30) | Cron relance → flag du jour existe MAIS retries en attente → relance quand meme |
-| XX+1:00 | Cron relance → retries terminees ou aucune → exit 0 instantanement |
+| XX:10 | Cron lance `run_server.sh` → `git pull` + `run_daily.py` |
+| XX:10 | `run_daily.py` verifie `last_success.txt` → pas de flag → lance le pipeline |
+| XX:10 | Si pas de mail : le script echoue proprement, email d'alerte envoye |
+| XX:40 | Cron relance → toujours pas de flag → reessaie |
+| XX+1:10 | Relance via nouveau cron toutes les heures |
+| ...   | Repeat à :10 et :40 jusqu'a ce que le mail d'Abraham arrive |
+| YY:10 (ou YY:40) | Mail trouve → pipeline complet → `last_success.txt` = date du jour |
+| YY+1:10 (ou YY:40 suivant) | Cron relance → flag du jour existe MAIS retries en attente → relance quand meme |
+| YY+2:10 | Cron relance → retries terminees ou aucune → exit 0 instantanement |
 
 Les logs sont dans `/opt/perf_commissions/logs/pipeline_2026-03.log` (1 fichier/mois, purge auto > 60 jours).
 
