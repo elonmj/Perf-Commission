@@ -376,7 +376,7 @@ def main():
             if name == "00 - Fetch Mail":
                 processed_state = load_processed_state()
                 current_mail_id = get_latest_pending_mail_id(processed_state)
-            if current_mail_id and name.startswith(("01 -", "02 -", "03 -", "04 -", "05 -", "06 -", "07 -", "08 -", "09 -")):
+            if current_mail_id and name.startswith(("01 -", "02 -", "03 -", "04 -", "05 -", "06 -")):
                 mark_step_completed(current_mail_id, name)
 
         if not ok:
