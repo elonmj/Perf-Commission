@@ -128,23 +128,32 @@ def load_fetch_mail_module():
     return module
 
 
-def has_unprocessed_latest_mail(processed_state: dict) -> bool:
-    """Retourne True si le dernier mail Gmail correspondant n'a pas encore ete traite avec succes."""
+def get_latest_unprocessed_mail_id(processed_state: dict) -> str | None:
+    """Retourne l'id du dernier mail Gmail correspondant s'il n'est pas marque success."""
     try:
         fetch_mail = load_fetch_mail_module()
         latest_message = fetch_mail.get_latest_matching_message()
     except Exception as exc:
         print(f"  [Check Mail] Controle Gmail impossible, skip du rerun mail: {exc}")
-        return False
+        return None
 
     if not latest_message:
-        return False
+        return None
 
     latest_id = latest_message.get("id")
     latest_meta = processed_state.get(latest_id, {}) if latest_id else {}
     latest_status = latest_meta.get("status") if isinstance(latest_meta, dict) else None
 
     if latest_status == "success":
+        return None
+
+    return latest_id
+
+
+def has_unprocessed_latest_mail(processed_state: dict) -> bool:
+    """Retourne True si le dernier mail Gmail correspondant n'a pas encore ete traite avec succes."""
+    latest_id = get_latest_unprocessed_mail_id(processed_state)
+    if not latest_id:
         return False
 
     print(f"  [Check Mail] Nouveau mail ou mail non finalise detecte: {latest_id}")
@@ -291,6 +300,20 @@ def main():
 
     processed_state = load_processed_state()
     current_mail_id = get_latest_pending_mail_id(processed_state)
+    latest_unprocessed_mail_id = None
+
+    if not args.skip_fetch:
+        latest_unprocessed_mail_id = get_latest_unprocessed_mail_id(processed_state)
+
+    if current_mail_id and latest_unprocessed_mail_id and latest_unprocessed_mail_id != current_mail_id:
+        last_step = processed_state.get(current_mail_id, {}).get("last_step_completed", "?")
+        print(
+            "  [Reprise] Ancien mail pending detecte "
+            f"({current_mail_id}, dernier step OK: {last_step}) mais un mail plus recent "
+            f"attend le traitement ({latest_unprocessed_mail_id}). Priorite au dernier mail."
+        )
+        current_mail_id = None
+
     if current_mail_id:
         last_step = processed_state.get(current_mail_id, {}).get("last_step_completed", "?")
         print(f"  [Reprise] Mail pending detecte: {current_mail_id} (dernier step OK: {last_step})")
@@ -326,12 +349,6 @@ def main():
     # 06 — Send
     if not args.skip_send:
         steps.append(("06 - Send Report", "scripts/06_send_report.py"))
-
-    # 07, 08, 09 - Rapports Périodiques (auto-régulés, aucun envoi si déjà fait)
-    if not args.skip_send:
-        steps.append(("07 - Weekly BA Activity", "scripts/07_weekly_ba_activity.py"))
-        steps.append(("08 - Weekly Sup KPI", "scripts/08_weekly_sup_kpi.py"))
-        steps.append(("09 - Monthly Financial", "scripts/09_monthly_financial.py"))
 
     # Reprise intelligente: reprendre a la prochaine etape non reussie pour le mail pending.
     if current_mail_id:

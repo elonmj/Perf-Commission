@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 from datetime import date
 import os
@@ -16,6 +17,20 @@ from connections.connect import make_engine
 
 app = FastAPI(title="API Performances LKA", description="API connectée à MySQL pour récupérer les performances avec l'ID Pulse")
 
+cors_origins = [
+    origin.strip()
+    for origin in os.environ.get("PERF_API_CORS_ORIGINS", "*").split(",")
+    if origin.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins or ["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 try:
     engine = make_engine()
 except Exception as e:
@@ -26,7 +41,8 @@ except Exception as e:
 def get_performance(
     id_pulse: str, 
     start_date: Optional[date] = Query(None, description="Date de début (YYYY-MM-DD)"),
-    end_date: Optional[date] = Query(None, description="Date de fin (YYYY-MM-DD)")
+    end_date: Optional[date] = Query(None, description="Date de fin (YYYY-MM-DD)"),
+    include_details: bool = Query(False, description="Inclure le détail journalier")
 ):
     if engine is None:
         raise HTTPException(status_code=500, detail="Erreur de connexion à la base de données")
@@ -66,22 +82,10 @@ def get_performance(
         records_gadd = conn.execute(text(query_gadd), params).fetchall()
         records_ads = conn.execute(text(query_ads), params).fetchall()
 
-    # 5. Fusionner les résultats par date
-    performances = {}
-    
-    for row in records_gadd:
-        d = row[0].isoformat()
-        if d not in performances:
-            performances[d] = {"gadd": 0, "ads": 0}
-        performances[d]["gadd"] = row[1]
-        
-    for row in records_ads:
-        d = row[0].isoformat()
-        if d not in performances:
-            performances[d] = {"gadd": 0, "ads": 0}
-        performances[d]["ads"] = row[1]
+    total_gadd = sum((row[1] or 0) for row in records_gadd)
+    total_ads = sum((row[1] or 0) for row in records_ads)
 
-    return {
+    response = {
         "success": True,
         "id_pulse": id_pulse,
         "user_name": user_name,
@@ -90,8 +94,30 @@ def get_performance(
             "start_date": start_date,
             "end_date": end_date
         },
-        "performances": performances
+        "total": {
+            "gadd": total_gadd,
+            "ads": total_ads,
+        },
     }
+
+    if include_details:
+        performances = {}
+
+        for row in records_gadd:
+            d = row[0].isoformat()
+            if d not in performances:
+                performances[d] = {"gadd": 0, "ads": 0}
+            performances[d]["gadd"] = row[1]
+
+        for row in records_ads:
+            d = row[0].isoformat()
+            if d not in performances:
+                performances[d] = {"gadd": 0, "ads": 0}
+            performances[d]["ads"] = row[1]
+
+        response["performances"] = performances
+
+    return response
 
 @app.get("/")
 def read_root():

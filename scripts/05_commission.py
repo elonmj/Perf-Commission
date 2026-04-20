@@ -340,11 +340,40 @@ def get_daily_metric_totals(engine, date_start, date_end):
 
     return totals
 
+def has_any_activity(totals):
+    return (totals.get("GADD", 0) + totals.get("ADS", 0)) > 0
+
 def detect_pending_retries(daily_totals):
     pending = []
-    for perf_date, totals in sorted(daily_totals.items()):
+    sorted_totals = sorted(daily_totals.items())
+    zero_run = []
+
+    def flush_zero_run(next_totals=None):
+        nonlocal zero_run
+        if not zero_run:
+            return
+
+        first_idx = zero_run[0][0]
+        prev_totals = sorted_totals[first_idx - 1][1] if first_idx > 0 else None
+        if prev_totals and next_totals and has_any_activity(prev_totals) and has_any_activity(next_totals):
+            for _, retry_date in zero_run:
+                pending.append({
+                    "date": retry_date.isoformat(),
+                    "metric": "GADD+ADS",
+                    "reason": "GADD et ADS a 0 entre deux jours actifs",
+                })
+
+        zero_run = []
+
+    for idx, (perf_date, totals) in enumerate(sorted_totals):
         gadd_total = totals.get("GADD", 0)
         ads_total = totals.get("ADS", 0)
+
+        if gadd_total == 0 and ads_total == 0:
+            zero_run.append((idx, perf_date))
+            continue
+
+        flush_zero_run(totals)
 
         if gadd_total > 0 and ads_total == 0:
             pending.append({
@@ -361,6 +390,12 @@ def detect_pending_retries(daily_totals):
 
     return pending
 
+
+def detect_retry_dates_in_range(engine, date_start, date_end):
+    if date_start > date_end:
+        return []
+    return detect_pending_retries(get_daily_metric_totals(engine, date_start, date_end))
+
 def refresh_commission_state(engine, date_start, date_end):
     state = load_commission_state()
     current_range_dates = {current_date.isoformat() for current_date in iter_dates(date_start, date_end)}
@@ -369,9 +404,7 @@ def refresh_commission_state(engine, date_start, date_end):
         if item.get("date") not in current_range_dates
     ]
 
-    pending_for_current_range = detect_pending_retries(
-        get_daily_metric_totals(engine, date_start, date_end)
-    )
+    pending_for_current_range = detect_retry_dates_in_range(engine, date_start, date_end)
     remaining_pending.extend(pending_for_current_range)
     save_commission_state({"pending_retries": remaining_pending})
     return pending_for_current_range
@@ -731,6 +764,23 @@ def resolve_date_range(engine, args):
             else:
                 # Fallback global si aucun fichier de commission précédent n'existe
                 start = end - timedelta(days=AUTO_DAYS_RANGE - 1)
+
+        if current_source_range:
+            retrospective_start = current_source_range["source_start_date"]
+            retrospective_retries = detect_retry_dates_in_range(engine, retrospective_start, end)
+            retrospective_dates = [
+                datetime.strptime(item["date"], "%Y-%m-%d").date()
+                for item in retrospective_retries
+                if item.get("date")
+            ]
+            if retrospective_dates:
+                retry_start = min(retrospective_dates)
+                if retry_start < start:
+                    print(
+                        f"⚠ Donnees anormales detectees dans le perimetre du mail courant, "
+                        f"reprise forcee depuis {format_date_fr(retry_start)}."
+                    )
+                    start = retry_start
 
         daily_anchor_start = load_daily_recompute_anchor(processing_day)
         if daily_anchor_start and daily_anchor_start < start:

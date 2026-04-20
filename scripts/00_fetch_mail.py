@@ -32,7 +32,11 @@ INPUTS = ROOT / "inputs"
 CREDS_FILE = ROOT / "connections" / "credentials.json"
 TOKEN_FILE = ROOT / "connections" / "token.json"
 PROCESSED_IDS_FILE = ROOT / "data" / "processed_mail_ids.json"
-MAIL_QUERY = 'subject:(PERFORMANCE OR PERFORMANCES) subject:(GLOBALE OR GLOBALES)'
+MAIL_QUERY = (
+    'subject:(PERFORMANCE OR PERFORMANCES) '
+    'subject:(GLOBAL OR GLOBALE OR GLOBALES) '
+    'has:attachment filename:xlsx'
+)
 
 # Lecture (scopes)
 SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
