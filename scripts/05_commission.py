@@ -687,7 +687,7 @@ def write_sheet(wb, sheet_name, df_pivot, date_start, date_end, periods, data_ty
                 except: cell.value = val
 
             if headers[c_idx-1] == 'USER NAME':
-                cell.value = str(val).lower() if val else ""
+                cell.value = str(val) if val else ""
 
             if val is None or pd.isna(val) or val == 0:
                 if c_idx in cur_indices or c_idx in qty_indices:
