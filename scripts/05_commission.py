@@ -827,7 +827,7 @@ def main():
 
     FILE_GROUPS = {
         "BA Animation": ["Animation Pick-up", "Animation POS"],
-        "BA Classiques & BA AGENCE": ["BA CLASSIQUE", "BA_AGENCE"],
+        "BA Classiques & BA AGENCE": ["BA CLASSIQUE", "BA_AGENCE", "BA"],
         "MA Acquisition": ["MA"]
     }
     all_group_channels = sorted({channel for channels in FILE_GROUPS.values() for channel in channels})
