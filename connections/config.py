@@ -113,8 +113,19 @@ FLAG_FILE         = "last_success.txt"
 # ─── ALERTES ADMIN (pour notify_failure sur serveur) ────────────────────────
 ADMIN_EMAIL = os.environ.get("PERF_ADMIN_EMAIL", "joselonm@gmail.com")
 
+# ─── GITHUB ACTIONS DISPATCH (déclenche les pipelines dépendants) ───────────
+# Après traitement des performances, le serveur notifie GitHub Actions pour
+# lancer immédiatement Sales_Team_Analysis, Sup_KPI, etc. sans attendre le cron.
+GITHUB_DISPATCH_TOKEN     = os.environ.get("GITHUB_DISPATCH_TOKEN", "")
+GITHUB_DISPATCH_REPO      = os.environ.get("GITHUB_DISPATCH_REPO", "lkageteam/AUTOMATIONS-BI")
+GITHUB_DISPATCH_WORKFLOW  = os.environ.get("GITHUB_DISPATCH_WORKFLOW", "run-all.yml")
+GITHUB_DISPATCH_PIPELINES = os.environ.get("GITHUB_DISPATCH_PIPELINES", "Sales_Team_Analysis,Sup_KPI")
+
 # ─── FICHIER D'ERREURS SYNC ──────────────────────────────────────────────────
 SYNC_ERRORS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "outputs", "sync_errors.json")
+
+# ─── FICHIER D'AVERTISSEMENTS TOTAUX (Commission vs Base) ────────────────────
+TOTAL_WARNINGS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "outputs", "total_warnings.json")
 
 # ─── CONFIGURATION BI (Génération des Commissions) ─────────────────────────
 # Mode AUTO : calcule les X derniers jours disponibles en base

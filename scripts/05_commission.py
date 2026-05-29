@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT))
 from connections.config import (
     MYSQL_DATABASE, TABLE_DAILY_GADD, TABLE_DAILY_ADS,
     AUTO_MODE, AUTO_DAYS_RANGE, MANUAL_END_DATE, MANUAL_RANGE_DAYS,
+    TOTAL_WARNINGS_FILE,
 )
 from connections.connect import make_engine
 
@@ -339,6 +340,102 @@ def get_daily_metric_totals(engine, date_start, date_end):
         totals[pd.to_datetime(perf_date).date()]["ADS"] = int(total_qty or 0)
 
     return totals
+
+
+def verify_totals(engine, df_gadd_raw, df_ads_raw, df_all_gadd, df_all_ads,
+                  day_dates, date_start, date_end, all_group_channels):
+    """Compare les totaux du fichier Excel (pivot) avec ceux de la base.
+    Écrit un fichier JSON de warnings et retourne la liste."""
+    warnings = []
+    info_messages = []
+
+    # 1. Totaux depuis le pivot (ce qui sera dans le fichier Excel)
+    pivot_gadd = {}
+    pivot_ads = {}
+    for day_date in day_dates:
+        day_label = format_day_header_fr(day_date)
+        if not df_all_gadd.empty and day_label in df_all_gadd.columns:
+            pivot_gadd[day_date] = int(df_all_gadd[day_label].sum())
+        if not df_all_ads.empty and day_label in df_all_ads.columns:
+            pivot_ads[day_date] = int(df_all_ads[day_label].sum())
+
+    # 2. Totaux depuis les vues brutes (filtrées par canaux du fichier)
+    raw_gadd = {}
+    raw_ads = {}
+    if not df_gadd_raw.empty and 'real_channel' in df_gadd_raw.columns:
+        df_g_filt = df_gadd_raw[df_gadd_raw['real_channel'].isin(all_group_channels)]
+        raw_gadd = df_g_filt.groupby('perf_date')['nb_total'].sum().to_dict() if not df_g_filt.empty else {}
+    if not df_ads_raw.empty and 'real_channel' in df_ads_raw.columns:
+        df_a_filt = df_ads_raw[df_ads_raw['real_channel'].isin(all_group_channels)]
+        raw_ads = df_a_filt.groupby('perf_date')['nb_total'].sum().to_dict() if not df_a_filt.empty else {}
+
+    # 3. Coherence interne : pivot vs vues filtrées (si écart = bug)
+    for day_date in day_dates:
+        pg = pivot_gadd.get(day_date, 0)
+        pa = pivot_ads.get(day_date, 0)
+        rg = raw_gadd.get(day_date, 0)
+        ra = raw_ads.get(day_date, 0)
+
+        if pg != rg:
+            warnings.append({
+                "date": day_date.isoformat(),
+                "metric": "GADD",
+                "file_total": pg,
+                "db_total": rg,
+                "diff": pg - rg,
+                "message": f"GADD {format_date_fr(day_date)} : pivot={pg}, vues={rg}, écart={pg - rg:+d}"
+            })
+        if pa != ra:
+            warnings.append({
+                "date": day_date.isoformat(),
+                "metric": "ADS",
+                "file_total": pa,
+                "db_total": ra,
+                "diff": pa - ra,
+                "message": f"ADS {format_date_fr(day_date)} : pivot={pa}, vues={ra}, écart={pa - ra:+d}"
+            })
+
+    # 4. Canaux exclus : vues filtrées vs base globale (info, pas alerte)
+    db_totals = get_daily_metric_totals(engine, date_start, date_end)
+    excluded_by_date = {}
+    for day_date in day_dates:
+        rg = raw_gadd.get(day_date, 0)
+        ra = raw_ads.get(day_date, 0)
+        dg = db_totals.get(day_date, {}).get("GADD", 0)
+        da = db_totals.get(day_date, {}).get("ADS", 0)
+        g_exc = dg - rg
+        a_exc = da - ra
+        if g_exc > 0 or a_exc > 0:
+            excluded_by_date[day_date.isoformat()] = {"GADD": g_exc, "ADS": a_exc}
+
+    if excluded_by_date:
+        info_messages.append(f"Canaux exclus du fichier : {len(excluded_by_date)} jour(s) avec données hors FILE_GROUPS.")
+
+    # 5. Sauvegarde (warnings uniquement pour les écarts internes)
+    Path(TOTAL_WARNINGS_FILE).parent.mkdir(parents=True, exist_ok=True)
+    with open(TOTAL_WARNINGS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(warnings, f, ensure_ascii=False, indent=2)
+
+    if warnings:
+        print(f"\n⚠ {len(warnings)} écart(s) de totaux détecté(s) :")
+        for w in warnings:
+            print(f"  {w['message']}")
+    else:
+        print("\n✅ Totaux cohérents entre pivot Excel et vues MySQL.")
+
+    if info_messages:
+        for m in info_messages:
+            print(f"  ℹ {m}")
+
+    if excluded_by_date:
+        print(f"  ℹ Canaux exclus par jour :")
+        for d, v in sorted(excluded_by_date.items()):
+            parts = []
+            if v["GADD"] > 0: parts.append(f"GADD +{v['GADD']}")
+            if v["ADS"] > 0: parts.append(f"ADS +{v['ADS']}")
+            print(f"     {d}: {', '.join(parts)}")
+
+    return warnings
 
 def has_any_activity(totals):
     return (totals.get("GADD", 0) + totals.get("ADS", 0)) > 0
@@ -897,7 +994,13 @@ def main():
             f"{format_date_fr(current_source_range['source_start_date'])} -> "
             f"{format_date_fr(current_source_range['source_end_date'])}"
         )
-    
+
+    # ── Vérification des totaux ──
+    verify_totals(
+        engine, df_gadd_raw, df_ads_raw, df_all_gadd, df_all_ads,
+        day_dates, date_start, date_end, all_group_channels
+    )
+
     print(f"\n✅ Fichier généré : {out_path.name}")
 
 if __name__ == "__main__":

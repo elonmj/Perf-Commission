@@ -35,7 +35,7 @@ sys.path.insert(0, str(ROOT))
 from connections.config import (
     GMAIL_USER,
     COMMISSION_RECIPIENT, COMMISSION_SUBJECT_TPL,
-    SYNC_ERRORS_FILE,
+    SYNC_ERRORS_FILE, TOTAL_WARNINGS_FILE,
 )
 
 
@@ -88,8 +88,20 @@ def load_sync_errors() -> list[str]:
         return []
 
 
-def build_html_body(date_part: str, file_names: list[str], sync_errors: list[str]) -> str:
+def load_total_warnings() -> list[dict]:
+    """Charge les avertissements de totaux depuis le fichier JSON."""
+    path = Path(TOTAL_WARNINGS_FILE)
+    if not path.exists():
+        return []
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def build_html_body(date_part: str, file_names: list[str], sync_errors: list[str], total_warnings: list[dict] = None) -> str:
     """Construit le corps HTML de l'email."""
+    total_warnings = total_warnings or []
     errors_html = ""
     if sync_errors:
         rows = "".join(
@@ -110,7 +122,32 @@ def build_html_body(date_part: str, file_names: list[str], sync_errors: list[str
             <p style="margin:0;color:#155724;">✅ Synchronisation MySQL terminée sans erreur.</p>
         </div>
         """
-        
+
+    # ── Alertes de totaux ──
+    totals_html = ""
+    if total_warnings:
+        rows = "".join(
+            f'<tr><td style="padding:6px 12px;border:1px solid #e0e0e0;color:#c0392b;">'
+            f'⚠ {w["message"]}</td></tr>' for w in total_warnings
+        )
+        totals_html = f"""
+        <div style="margin-top:20px;padding:15px;background:#f8d7da;border-left:4px solid #dc3545;border-radius:4px;">
+            <h3 style="margin:0 0 10px;color:#721c24;">⚠ Écarts de totaux détectés ({len(total_warnings)})</h3>
+            <p style="margin:0 0 10px;color:#721c24;font-size:13px;">
+                Les totaux du fichier Excel diffèrent de ceux de la base de données. Vérifiez la cohérence.
+            </p>
+            <table style="border-collapse:collapse;width:100%;">
+                {rows}
+            </table>
+        </div>
+        """
+    else:
+        totals_html = """
+        <div style="margin-top:20px;padding:15px;background:#d4edda;border-left:4px solid #28a745;border-radius:4px;">
+            <p style="margin:0;color:#155724;">✅ Totaux cohérents entre fichier Excel et base de données.</p>
+        </div>
+        """
+
     files_html = "".join([f"<li>📎 <strong>{f}</strong></li>" for f in file_names])
 
     return f"""
@@ -164,6 +201,7 @@ def build_html_body(date_part: str, file_names: list[str], sync_errors: list[str
             </p>
 
             {errors_html}
+            {totals_html}
         </div>
 
         <div style="padding:15px;background:#e9ecef;border-radius:0 0 8px 8px;text-align:center;font-size:12px;color:#888;">
@@ -217,15 +255,16 @@ def send_email(file_paths: list[Path], recipient: str):
     subject = COMMISSION_SUBJECT_TPL.format(date=date_part)
 
     sync_errors = load_sync_errors()
+    total_warnings = load_total_warnings()
 
     msg = MIMEMultipart("mixed")
     msg["From"] = GMAIL_USER
     msg["To"] = recipient
     msg["Subject"] = subject
-    
+
     file_names = [f.name for f in file_paths]
 
-    html_body = build_html_body(date_part, file_names, sync_errors)
+    html_body = build_html_body(date_part, file_names, sync_errors, total_warnings)
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     # Pieces jointes
@@ -257,7 +296,9 @@ def send_email(file_paths: list[Path], recipient: str):
     print(f"  Email envoye a {recipient}")
     print(f"  Sujet : {subject}")
     if sync_errors:
-        print(f"  {len(sync_errors)} alerte(s) incluse(s) dans le mail.")
+        print(f"  {len(sync_errors)} alerte(s) sync incluse(s) dans le mail.")
+    if total_warnings:
+        print(f"  {len(total_warnings)} alerte(s) totaux incluse(s) dans le mail.")
 
 
 def main():
