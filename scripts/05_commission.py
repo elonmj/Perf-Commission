@@ -44,6 +44,32 @@ THIN_BORDER  = Border(
 CURRENCY_FMT = '#,##0'
 IDENTITY_COLUMNS = ['USER NAME', 'Superviseur', 'AGENT_NAME', 'MSISDN', 'CANAL']
 
+# ─── NORMALISATION DES CANAUX ───────────────────────────────────────────────
+# Argent sensible : les noms de canaux (real_channel) arrivent avec des variantes
+# (espaces, underscores, pluriels, casse). On centralise ici la correspondance
+# vers le canal CANONIQUE (= type_agent dans commission_tarifs).
+def normalize_channel_key(channel) -> str:
+    if channel is None or (isinstance(channel, float) and pd.isna(channel)):
+        return ""
+    return " ".join(str(channel).strip().upper().split())
+
+CHANNEL_CANONICAL = {
+    "BA": "BA",
+    "BA CLASSIQUE": "BA",
+    "BA CLASSIQUES": "BA",
+    "BA AGENCE": "BA_AGENCE",
+    "BA_AGENCE": "BA_AGENCE",
+    "ANIMATION PICK-UP": "Animation Pick-up",
+    "ANIMATION POS": "Animation POS",
+    "MA": "MA",
+}
+# Canaux explicitement NON commissionnes : exclus du fichier sans generer d'alerte.
+EXCLUDED_CHANNELS = {"KIOSQUES", "KIOSQUE", "POS"}
+
+def canonical_channel(channel):
+    """Renvoie le canal canonique paye, ou None si inconnu/non paye."""
+    return CHANNEL_CANONICAL.get(normalize_channel_key(channel))
+
 # ─── HELPERS ───────────────────────────────────────────────────────────────────
 def format_date_fr(d: date) -> str:
     jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
@@ -299,7 +325,9 @@ def fetch_data(engine, view_name, val_col, comm_col, date_start, date_end):
             periode_nom,
             taux_{val_col}_applique AS pu,
             SUM({val_col}) AS nb_total,
-            SUM({comm_col}) AS amt_total
+            SUM({comm_col}) AS amt_total,
+            SUM({comm_col}_t1) AS amt_t1,
+            SUM({comm_col}_t2) AS amt_t2
         FROM {view_name}
         WHERE perf_date BETWEEN :ds AND :de
         GROUP BY 
@@ -362,11 +390,15 @@ def verify_totals(engine, df_gadd_raw, df_ads_raw, df_all_gadd, df_all_ads,
     # 2. Totaux depuis les vues brutes (filtrées par canaux du fichier)
     raw_gadd = {}
     raw_ads = {}
+    def _paid_mask(df_raw):
+        if 'canal_norm' in df_raw.columns:
+            return df_raw['canal_norm'].isin(all_group_channels)
+        return df_raw['real_channel'].map(canonical_channel).isin(all_group_channels)
     if not df_gadd_raw.empty and 'real_channel' in df_gadd_raw.columns:
-        df_g_filt = df_gadd_raw[df_gadd_raw['real_channel'].isin(all_group_channels)]
+        df_g_filt = df_gadd_raw[_paid_mask(df_gadd_raw)]
         raw_gadd = df_g_filt.groupby('perf_date')['nb_total'].sum().to_dict() if not df_g_filt.empty else {}
     if not df_ads_raw.empty and 'real_channel' in df_ads_raw.columns:
-        df_a_filt = df_ads_raw[df_ads_raw['real_channel'].isin(all_group_channels)]
+        df_a_filt = df_ads_raw[_paid_mask(df_ads_raw)]
         raw_ads = df_a_filt.groupby('perf_date')['nb_total'].sum().to_dict() if not df_a_filt.empty else {}
 
     # 3. Coherence interne : pivot vs vues filtrées (si écart = bug)
@@ -411,17 +443,78 @@ def verify_totals(engine, df_gadd_raw, df_ads_raw, df_all_gadd, df_all_ads,
     if excluded_by_date:
         info_messages.append(f"Canaux exclus du fichier : {len(excluded_by_date)} jour(s) avec données hors FILE_GROUPS.")
 
+    # 4bis. CONTROLE D'INTEGRITE DES CANAUX (argent sensible), par canal sur la base brute :
+    #   - canal explicitement exclu (KIOSQUES/POS) : ignore (pas d'alerte)
+    #   - canal paye connu avec des unites a TAUX 0 : non payees -> alerte
+    #   - canal INCONNU avec du volume : possible faute d'ecriture d'un bon canal -> alerte
+    for label, df_raw in (("GADD", df_gadd_raw), ("ADS", df_ads_raw)):
+        if df_raw.empty or 'real_channel' not in df_raw.columns:
+            continue
+        agg = df_raw.groupby('real_channel', dropna=False).agg(
+            qty=('nb_total', 'sum'), amount=('amt_total', 'sum')
+        ).reset_index()
+        for _, row in agg.iterrows():
+            channel = row['real_channel']
+            qty = int(row['qty'] or 0)
+            amount = int(row['amount'] or 0)
+            if qty <= 0:
+                continue
+            key = normalize_channel_key(channel)
+            if key in EXCLUDED_CHANNELS:
+                continue
+            canon = CHANNEL_CANONICAL.get(key)
+            if canon is None:
+                warnings.append({
+                    "metric": label, "channel": str(channel), "qty": qty, "amount": amount,
+                    "message": (
+                        f"{label} : canal INCONNU '{channel}' avec {qty} unite(s) (montant {amount}). "
+                        f"Ni canal paye connu ni exclu -> verifier une faute d'ecriture (argent a risque)."
+                    ),
+                })
+                continue
+            sub = df_raw[df_raw['real_channel'] == channel]
+            zero = sub[(sub['nb_total'] > 0) & (sub['pu'].fillna(0) == 0)]
+            if not zero.empty:
+                lost_qty = int(zero['nb_total'].sum())
+                warnings.append({
+                    "metric": label, "channel": str(channel), "qty": lost_qty, "amount": 0,
+                    "message": (
+                        f"{label} : canal '{channel}' (=> {canon}) a {lost_qty} unite(s) a TAUX 0 "
+                        f"= NON payees. Tarif manquant pour ces dates/jours -> a verifier."
+                    ),
+                })
+
+    # 4ter. Doublons de casse sur user_name (meme agent, ecritures differentes a la source).
+    dup_names = {}
+    for df_raw in (df_gadd_raw, df_ads_raw):
+        if df_raw.empty or 'user_name' not in df_raw.columns:
+            continue
+        tmp = df_raw[['user_name']].dropna().copy()
+        tmp['k'] = tmp['user_name'].astype(str).str.strip().str.lower()
+        for k, names in tmp.groupby('k')['user_name']:
+            variants = set(str(n).strip() for n in names)
+            if len(variants) > 1:
+                dup_names[k] = set(dup_names.get(k, set())) | variants
+    for k, variants in sorted(dup_names.items()):
+        warnings.append({
+            "metric": "DOUBLON", "channel": "", "qty": len(variants), "amount": 0,
+            "message": (
+                f"Doublon de casse user_name : {' / '.join(sorted(variants))} = meme agent. "
+                f"Fusionne dans le fichier, a corriger a la source (daily_gadd)."
+            ),
+        })
+
     # 5. Sauvegarde (warnings uniquement pour les écarts internes)
     Path(TOTAL_WARNINGS_FILE).parent.mkdir(parents=True, exist_ok=True)
     with open(TOTAL_WARNINGS_FILE, 'w', encoding='utf-8') as f:
         json.dump(warnings, f, ensure_ascii=False, indent=2)
 
     if warnings:
-        print(f"\n⚠ {len(warnings)} écart(s) de totaux détecté(s) :")
+        print(f"\n⚠ {len(warnings)} anomalie(s) détectée(s) (totaux / canaux / doublons) :")
         for w in warnings:
             print(f"  {w['message']}")
     else:
-        print("\n✅ Totaux cohérents entre pivot Excel et vues MySQL.")
+        print("\n✅ Totaux, canaux et identifiants cohérents.")
 
     if info_messages:
         for m in info_messages:
@@ -646,6 +739,11 @@ def build_period_blocks(day_dates, date_period_map):
         suffix = "" if period_counts[period_name] == 1 else f" {seen_counts[period_name]}"
         block['total_label'] = f"TOTAL {period_name}{suffix}"
         block['amount_label'] = f"Mnt {period_name}{suffix}"
+        # Decomposition des paliers (uniquement le bloc Dimanche) : <=10 et >10 adds.
+        block['is_sunday'] = (period_name == 'Dimanche')
+        if block['is_sunday']:
+            block['amount_label_t1'] = f"Mnt {period_name}{suffix} <= 10"
+            block['amount_label_t2'] = f"Mnt {period_name}{suffix} > 10"
 
     return blocks
 
@@ -654,19 +752,23 @@ def pivot_data(df, day_dates, period_blocks, qty_label="Add"):
         return pd.DataFrame()
 
     records = []
-    group_cols = ['user_name', 'nom_prenom_superviseur', 'agent_name', 'msisdn_momo', 'real_channel']
-    grouped = df.groupby(group_cols, dropna=False)
+    # Dedup par agent insensible a la casse du user_name (la collation MySQL est deja
+    # insensible a la casse : 'Octavie.Dadjo' et 'OCtavie.Dadjo' sont le MEME agent).
+    df = df.copy()
+    df['_user_key'] = df['user_name'].astype(str).str.strip().str.lower()
+    grouped = df.groupby('_user_key', dropna=False)
 
-    for name, group in grouped:
+    for _user_key, group in grouped:
         group = group.copy()
         group['perf_date'] = pd.to_datetime(group['perf_date']).dt.date
+        rep = group.iloc[0]
 
         r = {
-            'USER NAME': name[0],
-            'Superviseur': name[1],
-            'AGENT_NAME': name[2],
-            'MSISDN': name[3],
-            'CANAL': name[4],
+            'USER NAME': str(rep['user_name']).strip(),
+            'Superviseur': rep['nom_prenom_superviseur'],
+            'AGENT_NAME': rep['agent_name'],
+            'MSISDN': rep['msisdn_momo'],
+            'CANAL': rep['real_channel'],
             f'TOTAL {qty_label}': group['nb_total'].sum(),
             'TOTAL A PAYER': group['amt_total'].sum()
         }
@@ -680,6 +782,11 @@ def pivot_data(df, day_dates, period_blocks, qty_label="Add"):
             block_group = group[group['perf_date'].isin(block['dates'])]
             r[block['total_label']] = block_group['nb_total'].sum() if not block_group.empty else 0
             r[block['amount_label']] = block_group['amt_total'].sum() if not block_group.empty else 0
+            if block.get('is_sunday'):
+                t1 = block_group['amt_t1'].sum() if (not block_group.empty and 'amt_t1' in block_group.columns) else 0
+                t2 = block_group['amt_t2'].sum() if (not block_group.empty and 'amt_t2' in block_group.columns) else 0
+                r[block['amount_label_t1']] = t1
+                r[block['amount_label_t2']] = t2
 
         records.append(r)
         
@@ -688,7 +795,10 @@ def pivot_data(df, day_dates, period_blocks, qty_label="Add"):
     for block in period_blocks:
         for day_date in block['dates']:
             cols.append(format_day_header_fr(day_date))
-        cols.extend([block['total_label'], block['amount_label']])
+        cols.append(block['total_label'])
+        if block.get('is_sunday'):
+            cols.extend([block['amount_label_t1'], block['amount_label_t2']])
+        cols.append(block['amount_label'])
     cols.extend([f'TOTAL {qty_label}', 'TOTAL A PAYER'])
 
     for col in cols:
@@ -922,9 +1032,16 @@ def main():
     df_gadd_raw = fetch_data(engine, "vw_commission_gadd", "gadd", "commission_gadd", date_start, date_end)
     df_ads_raw  = fetch_data(engine, "vw_commission_ads", "ads", "commission_ads", date_start, date_end)
 
+    # Canal normalise (canonique) : robuste aux variantes 'BA AGENCE'/'BA_AGENCE', 'BA CLASSIQUE'/'BA', etc.
+    if not df_gadd_raw.empty:
+        df_gadd_raw['canal_norm'] = df_gadd_raw['real_channel'].map(canonical_channel)
+    if not df_ads_raw.empty:
+        df_ads_raw['canal_norm'] = df_ads_raw['real_channel'].map(canonical_channel)
+
+    # Groupes du fichier exprimes en canaux CANONIQUES (= type_agent des tarifs).
     FILE_GROUPS = {
         "BA Animation": ["Animation Pick-up", "Animation POS"],
-        "BA Classiques & BA AGENCE": ["BA CLASSIQUE", "BA_AGENCE", "BA"],
+        "BA Classiques & BA AGENCE": ["BA", "BA_AGENCE"],
         "MA Acquisition": ["MA"]
     }
     all_group_channels = sorted({channel for channels in FILE_GROUPS.values() for channel in channels})
@@ -950,8 +1067,8 @@ def main():
     ads_frames  = []
 
     for group_name, group_channels in FILE_GROUPS.items():
-        df_g_grp = df_gadd_raw[df_gadd_raw['real_channel'].isin(group_channels)].copy() if not df_gadd_raw.empty else pd.DataFrame()
-        df_a_grp = df_ads_raw[df_ads_raw['real_channel'].isin(group_channels)].copy()  if not df_ads_raw.empty  else pd.DataFrame()
+        df_g_grp = df_gadd_raw[df_gadd_raw['canal_norm'].isin(group_channels)].copy() if not df_gadd_raw.empty else pd.DataFrame()
+        df_a_grp = df_ads_raw[df_ads_raw['canal_norm'].isin(group_channels)].copy()  if not df_ads_raw.empty  else pd.DataFrame()
 
         if not df_g_grp.empty:
             gadd_frames.append(pivot_data(df_g_grp, day_dates, period_blocks, qty_label="Add"))

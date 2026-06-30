@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS `commission_tarifs` (
     `date_fin`           DATE            NOT NULL,
     `jour_debut`         TINYINT         NULL COMMENT 'DAYOFWEEK: 1=Dim, 2=Lun, ..., 7=Sam',
     `jour_fin`           TINYINT         NULL,
+    `seuil_min`          INT             NOT NULL DEFAULT 0     COMMENT 'Volume min new adds (gadd) inclus',
+    `seuil_max`          INT             NOT NULL DEFAULT 99999 COMMENT 'Volume max new adds (gadd) inclus',
     `taux_gadd`          DECIMAL(10,2)   NOT NULL DEFAULT 0,
     `taux_ads`           DECIMAL(10,2)   NOT NULL DEFAULT 0,
     `periode_nom`        VARCHAR(50)     NOT NULL COMMENT 'Semaine, Weekend, Dimanche'
@@ -59,15 +61,26 @@ CREATE OR REPLACE VIEW vw_commission_gadd AS
 SELECT
     p.user_name, a.supervisor_full_name as superviseur, a.agent_name, a.momo_msisdn as msisdn_momo, a.real_channel, a.region, a.tss_name as tss,
     p.perf_date, p.gadd,
-    COALESCE(t.periode_nom, 'Autre') AS periode_nom,
-    COALESCE(t.taux_gadd, 0) AS taux_gadd_applique,
-    p.gadd * COALESCE(t.taux_gadd, 0) AS commission_gadd
+    COALESCE(MAX(t.periode_nom), 'Autre') AS periode_nom,
+    CASE WHEN p.gadd > 0
+         THEN ROUND(COALESCE(SUM(GREATEST(0, LEAST(p.gadd, t.seuil_max) - GREATEST(t.seuil_min, 1) + 1) * t.taux_gadd), 0) / p.gadd, 4)
+         ELSE COALESCE(MAX(t.taux_gadd), 0)
+    END AS taux_gadd_applique,
+    COALESCE(SUM(GREATEST(0, LEAST(p.gadd, t.seuil_max) - GREATEST(t.seuil_min, 1) + 1) * t.taux_gadd), 0) AS commission_gadd,
+    COALESCE(SUM(GREATEST(0, LEAST(p.gadd, t.seuil_max, 10) - GREATEST(t.seuil_min, 1)  + 1) * t.taux_gadd), 0) AS commission_gadd_t1,
+    COALESCE(SUM(GREATEST(0, LEAST(p.gadd, t.seuil_max)     - GREATEST(t.seuil_min, 11) + 1) * t.taux_gadd), 0) AS commission_gadd_t2
 FROM daily_gadd p
 LEFT JOIN lka_client_mtn.lka_usernames a ON p.user_name = a.user_name
 LEFT JOIN commission_tarifs t
-    ON  t.type_agent = a.real_channel
+    ON  t.type_agent = CASE
+            WHEN a.real_channel IN ('BA CLASSIQUE', 'BA') THEN 'BA'
+            WHEN a.real_channel IN ('BA AGENCE', 'BA_AGENCE') THEN 'BA_AGENCE'
+            ELSE a.real_channel
+        END
     AND p.perf_date BETWEEN t.date_debut AND t.date_fin
-    AND (t.jour_debut IS NULL OR DAYOFWEEK(p.perf_date) BETWEEN t.jour_debut AND t.jour_fin);
+    AND (t.jour_debut IS NULL OR DAYOFWEEK(p.perf_date) BETWEEN t.jour_debut AND t.jour_fin)
+GROUP BY p.user_name, a.supervisor_full_name, a.agent_name, a.momo_msisdn,
+         a.real_channel, a.region, a.tss_name, p.perf_date, p.gadd;
 """
 
 VIEW_ADS = """
@@ -75,15 +88,26 @@ CREATE OR REPLACE VIEW vw_commission_ads AS
 SELECT
     p.user_name, a.supervisor_full_name as superviseur, a.agent_name, a.momo_msisdn as msisdn_momo, a.real_channel, a.region, a.tss_name as tss,
     p.perf_date, p.ads,
-    COALESCE(t.periode_nom, 'Autre') AS periode_nom,
-    COALESCE(t.taux_ads, 0) AS taux_ads_applique,
-    p.ads * COALESCE(t.taux_ads, 0) AS commission_ads
+    COALESCE(MAX(t.periode_nom), 'Autre') AS periode_nom,
+    CASE WHEN p.ads > 0
+         THEN ROUND(COALESCE(SUM(GREATEST(0, LEAST(p.ads, t.seuil_max) - GREATEST(t.seuil_min, 1) + 1) * t.taux_ads), 0) / p.ads, 4)
+         ELSE COALESCE(MAX(t.taux_ads), 0)
+    END AS taux_ads_applique,
+    COALESCE(SUM(GREATEST(0, LEAST(p.ads, t.seuil_max) - GREATEST(t.seuil_min, 1) + 1) * t.taux_ads), 0) AS commission_ads,
+    COALESCE(SUM(GREATEST(0, LEAST(p.ads, t.seuil_max, 10) - GREATEST(t.seuil_min, 1)  + 1) * t.taux_ads), 0) AS commission_ads_t1,
+    COALESCE(SUM(GREATEST(0, LEAST(p.ads, t.seuil_max)     - GREATEST(t.seuil_min, 11) + 1) * t.taux_ads), 0) AS commission_ads_t2
 FROM daily_ads p
 LEFT JOIN lka_client_mtn.lka_usernames a ON p.user_name = a.user_name
 LEFT JOIN commission_tarifs t
-    ON  t.type_agent = a.real_channel
+    ON  t.type_agent = CASE
+            WHEN a.real_channel IN ('BA CLASSIQUE', 'BA') THEN 'BA'
+            WHEN a.real_channel IN ('BA AGENCE', 'BA_AGENCE') THEN 'BA_AGENCE'
+            ELSE a.real_channel
+        END
     AND p.perf_date BETWEEN t.date_debut AND t.date_fin
-    AND (t.jour_debut IS NULL OR DAYOFWEEK(p.perf_date) BETWEEN t.jour_debut AND t.jour_fin);
+    AND (t.jour_debut IS NULL OR DAYOFWEEK(p.perf_date) BETWEEN t.jour_debut AND t.jour_fin)
+GROUP BY p.user_name, a.supervisor_full_name, a.agent_name, a.momo_msisdn,
+         a.real_channel, a.region, a.tss_name, p.perf_date, p.ads;
 """
 
 
