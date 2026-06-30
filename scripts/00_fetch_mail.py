@@ -14,6 +14,7 @@ import sys
 import base64
 import argparse
 import json
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -33,7 +34,7 @@ CREDS_FILE = ROOT / "connections" / "credentials.json"
 TOKEN_FILE = ROOT / "connections" / "token.json"
 PROCESSED_IDS_FILE = ROOT / "data" / "processed_mail_ids.json"
 MAIL_QUERY = (
-    'subject:(PERFORMANCE OR PERFORMANCES) '
+    'subject:(PERFORMANCE OR PERFORMANCES OR PERORMANCE OR PERFOMANCE OR PEERFORMANCE OR PERFRMANCE) '
     'subject:(GLOBAL OR GLOBALE OR GLOBALES) '
     'has:attachment filename:xlsx'
 )
@@ -144,6 +145,56 @@ def get_latest_matching_message() -> dict | None:
     return messages[0]
 
 
+def extract_filename_date(filename: str) -> tuple[int, int, int] | None:
+    match = re.search(r"(20\d{2})(\d{2})(\d{2})", filename)
+    if match:
+        return tuple(int(part) for part in match.groups())
+
+    match = re.search(r"(\d{2})[-_/](\d{2})[-_/](20\d{2})", filename)
+    if match:
+        day, month, year = (int(part) for part in match.groups())
+        return (year, month, day)
+
+    return None
+
+
+def iter_attachment_candidates(payload: dict, depth: int = 0, order_start: int = 0):
+    filename = payload.get("filename") or ""
+    if filename.lower().endswith(".xlsx"):
+        attachment_id = payload.get("body", {}).get("attachmentId")
+        if attachment_id:
+            yield {
+                "filename": filename,
+                "attachment_id": attachment_id,
+                "depth": depth,
+                "order": order_start,
+                "size": int(payload.get("body", {}).get("size") or 0),
+                "filename_date": extract_filename_date(filename),
+            }
+            order_start += 1
+
+    for part in payload.get("parts", []):
+        for candidate in iter_attachment_candidates(part, depth + 1, order_start):
+            yield candidate
+            order_start = candidate["order"] + 1
+
+
+def choose_attachment_candidate(payload: dict) -> dict | None:
+    candidates = list(iter_attachment_candidates(payload))
+    if not candidates:
+        return None
+
+    def ranking_key(candidate: dict):
+        return (
+            -candidate["depth"],
+            candidate["filename_date"] or (0, 0, 0),
+            candidate["size"],
+            candidate["order"],
+        )
+
+    return max(candidates, key=ranking_key)
+
+
 def fetch_attachment(target_date: datetime | None = None) -> Path | None:
     """
     Cherche le mail PERFORMANCE GLOBALE non-lu via l'API Gmail
@@ -186,43 +237,30 @@ def fetch_attachment(target_date: datetime | None = None) -> Path | None:
             else:
                 print(f"  [Historique] Mail partiellement traité trouvé : {msg_id}. Reprise ou retéléchargement.")
                 
-        def get_all_parts(payload):
-            parts = [payload]
-            if "parts" in payload:
-                for p in payload["parts"]:
-                    parts.extend(get_all_parts(p))
-            return parts
-
         message = (
             service.users().messages().get(userId="me", id=msg_id).execute()
         )
 
-        all_parts = get_all_parts(message.get("payload", {}))
-        for part in all_parts:
-            filename = part.get("filename")
-            if filename:
-                print(f"  [DEBUG] Fichier vu dans le mail : '{filename}'")
-            if not filename or not filename.lower().endswith(".xlsx"):
-                continue
-
-            attachment_id = part["body"].get("attachmentId")
-            if not attachment_id:
-                continue
-
-            print(f"  Pièce jointe : {filename}")
+        candidate = choose_attachment_candidate(message.get("payload", {}))
+        if candidate:
+            print(
+                "  [DEBUG] Pièce jointe retenue : "
+                f"'{candidate['filename']}' (profondeur={candidate['depth']}, "
+                f"taille={candidate['size']})"
+            )
 
             attachment = (
                 service.users()
                 .messages()
                 .attachments()
-                .get(userId="me", messageId=msg_id, id=attachment_id)
+                .get(userId="me", messageId=msg_id, id=candidate["attachment_id"])
                 .execute()
             )
 
             file_data = base64.urlsafe_b64decode(
                 attachment["data"].encode("UTF-8")
             )
-            dest = INPUTS / filename
+            dest = INPUTS / candidate["filename"]
             dest.write_bytes(file_data)
             print(f"  Fichier sauvegardé : {dest.name}")
 
@@ -231,7 +269,6 @@ def fetch_attachment(target_date: datetime | None = None) -> Path | None:
             print("  [Historique] Mail marque comme telecharge (status=pending).")
 
             downloaded = dest
-            break
 
         if downloaded:
             break
