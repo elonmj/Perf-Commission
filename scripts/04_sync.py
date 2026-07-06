@@ -73,6 +73,42 @@ def execute_with_retry(engine, sql_str, rows, context_name, max_retries=5, delay
 
 
 
+def find_zero_regressions(engine, table: str, value_col: str, rows: list[dict]) -> list[dict]:
+    """Detecte, AVANT ecriture, les cas ou une ligne entrante vaut 0 alors que
+    la base contient deja une valeur strictement positive pour la meme cle
+    (user_name, perf_date). Un 0 n'est jamais une correction legitime d'une
+    valeur positive deja connue : c'est systematiquement le symptome d'une
+    cellule source vide/mal calculee (ex. formule Excel non tiree jusqu'en
+    bas) — jamais un vrai signal metier. Voir incident 2026-05/06 (audit
+    scripts/audit_perf_zero_overwrites.py cote LKA_Automations)."""
+    zero_keys = [(r["user_name"], r["perf_date"]) for r in rows if r[value_col] == 0]
+    if not zero_keys:
+        return []
+
+    tmp_table = f"_tmp_zero_check_{value_col}"
+    with engine.begin() as conn:
+        conn.execute(text(f"DROP TEMPORARY TABLE IF EXISTS {tmp_table}"))
+        conn.execute(text(
+            f"CREATE TEMPORARY TABLE {tmp_table} (user_name VARCHAR(255), perf_date DATE, PRIMARY KEY (user_name, perf_date))"
+        ))
+        conn.execute(
+            text(f"INSERT INTO {tmp_table} (user_name, perf_date) VALUES (:user_name, :perf_date)"),
+            [{"user_name": u, "perf_date": d} for u, d in zero_keys],
+        )
+        existing = conn.execute(text(
+            f"SELECT t.user_name, t.perf_date, m.{value_col} AS current_value "
+            f"FROM {tmp_table} t JOIN {table} m "
+            f"ON m.user_name = t.user_name AND m.perf_date = t.perf_date "
+            f"WHERE m.{value_col} > 0"
+        )).fetchall()
+        conn.execute(text(f"DROP TEMPORARY TABLE IF EXISTS {tmp_table}"))
+
+    return [
+        {"user_name": r.user_name, "perf_date": str(r.perf_date), "current_value": r.current_value}
+        for r in existing
+    ]
+
+
 def upsert_daily_metric(engine, path: Path, table: str, value_col: str) -> list[str]:
     """UPSERT daily_gadd ou daily_ads (cle = user_name + perf_date) — batch. Retourne les erreurs."""
     errors = []
@@ -96,12 +132,6 @@ def upsert_daily_metric(engine, path: Path, table: str, value_col: str) -> list[
     # Dedup
     df = df.drop_duplicates(subset=["user_name", "perf_date"], keep="last")
 
-    sql_str = (
-        f"INSERT INTO {table} (user_name, perf_date, {value_col}) "
-        f"VALUES (%(user_name)s, %(perf_date)s, %({value_col})s) "
-        f"ON DUPLICATE KEY UPDATE {value_col} = VALUES({value_col})"
-    )
-
     rows = []
     for _, row in df.iterrows():
         rows.append({
@@ -109,6 +139,39 @@ def upsert_daily_metric(engine, path: Path, table: str, value_col: str) -> list[
             "perf_date": str(row["perf_date"]),
             value_col: int(row[value_col]),
         })
+
+    # ── Garde-fou anti-regression (detection + alerte) ─────────────────────
+    # Un 0 entrant ne doit JAMAIS effacer silencieusement une valeur positive
+    # deja synchronisee. On le detecte ICI pour alerter (email/Slack via
+    # all_errors), en plus de la protection inconditionnelle au niveau SQL
+    # ci-dessous qui, elle, empeche l'ecriture quoi qu'il arrive.
+    try:
+        blocked = find_zero_regressions(engine, table, value_col, rows)
+    except Exception as e:
+        blocked = []
+        errors.append(f"{table} : verification anti-regression impossible ({e}) — protection SQL toujours active.")
+    if blocked:
+        detail = ", ".join(f"{b['user_name']}@{b['perf_date']} (etait {b['current_value']})" for b in blocked)
+        errors.append(
+            f"{table} : {len(blocked)} ecrasement(s) par 0 BLOQUE(S) — une valeur positive deja "
+            f"connue a ete protegee contre un 0 entrant (probable cellule source vide/formule non "
+            f"tiree) : {detail}"
+        )
+        print(f"  [PROTECTION] {table} : {len(blocked)} valeur(s) positive(s) protegee(s) contre un ecrasement par 0.")
+
+    # ON DUPLICATE KEY UPDATE ne remplace JAMAIS une valeur positive existante
+    # par un 0 entrant : c'est la garantie definitive, independante de toute
+    # detection applicative. Un 0 n'est accepte que sur une ligne qui n'existe
+    # pas encore, ou qui vaut deja 0. Toute autre valeur (0 ou positive) sur
+    # une ligne existante non-nulle continue de s'appliquer normalement
+    # (les vraies corrections restent possibles).
+    sql_str = (
+        f"INSERT INTO {table} (user_name, perf_date, {value_col}) "
+        f"VALUES (%(user_name)s, %(perf_date)s, %({value_col})s) "
+        f"ON DUPLICATE KEY UPDATE {value_col} = IF("
+        f"VALUES({value_col}) = 0 AND {table}.{value_col} > 0, "
+        f"{table}.{value_col}, VALUES({value_col}))"
+    )
 
     err = execute_with_retry(engine, sql_str, rows, table)
     if err:
