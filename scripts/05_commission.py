@@ -464,11 +464,15 @@ def verify_totals(engine, df_gadd_raw, df_ads_raw, df_all_gadd, df_all_ads,
                 continue
             canon = CHANNEL_CANONICAL.get(key)
             if canon is None:
+                sub = df_raw[df_raw['real_channel'].isna()] if pd.isna(channel) else df_raw[df_raw['real_channel'] == channel]
+                users = sorted(set(str(u) for u in sub['user_name'].dropna().unique())) if 'user_name' in sub.columns else []
+                users_str = ", ".join(users[:10]) + (f", ... (+{len(users) - 10} autre(s))" if len(users) > 10 else "") if users else "aucun user_name identifiable"
                 warnings.append({
                     "metric": label, "channel": str(channel), "qty": qty, "amount": amount,
                     "message": (
                         f"{label} : canal INCONNU '{channel}' avec {qty} unite(s) (montant {amount}). "
-                        f"Ni canal paye connu ni exclu -> verifier une faute d'ecriture (argent a risque)."
+                        f"Ni canal paye connu ni exclu -> verifier une faute d'ecriture (argent a risque). "
+                        f"Agent(s) concerne(s) : {users_str}."
                     ),
                 })
                 continue
