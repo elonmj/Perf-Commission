@@ -603,16 +603,31 @@ def refresh_commission_state(engine, date_start, date_end):
     save_commission_state({"pending_retries": remaining_pending})
     return pending_for_current_range
 
-def load_pending_retry_dates(end_date):
-    pending_dates = []
+def load_pending_retry_dates(engine, end_date):
+    """Dates en attente dont la donnee manquante est ENFIN arrivee en base.
+
+    Une date encore incomplete reste en attente SANS etirer la periode de
+    calcul : on ne la re-inclut dans le range que le jour ou sa metrique
+    manquante est reellement presente, pour la recalculer une seule fois."""
+    resolved_dates = []
     for item in load_commission_state().get("pending_retries", []):
         try:
             retry_date = datetime.strptime(item["date"], "%Y-%m-%d").date()
         except Exception:
             continue
-        if retry_date <= end_date:
-            pending_dates.append(retry_date)
-    return sorted(set(pending_dates))
+        if retry_date > end_date:
+            continue
+        metric = item.get("metric", "")
+        totals = get_daily_metric_totals(engine, retry_date, retry_date).get(retry_date, {})
+        gadd_total = totals.get("GADD", 0)
+        ads_total = totals.get("ADS", 0)
+        if metric == "ADS" and ads_total > 0:
+            resolved_dates.append(retry_date)
+        elif metric == "GADD" and gadd_total > 0:
+            resolved_dates.append(retry_date)
+        elif metric == "GADD+ADS" and (gadd_total > 0 or ads_total > 0):
+            resolved_dates.append(retry_date)
+    return sorted(set(resolved_dates))
 
 def get_active_periods(engine, date_start, date_end, group_channels=None):
     where_clauses = ["date_debut <= :de", "date_fin >= :ds"]
@@ -1001,13 +1016,13 @@ def resolve_date_range(engine, args):
             )
             start = daily_anchor_start
 
-        pending_retry_dates = load_pending_retry_dates(end)
+        pending_retry_dates = load_pending_retry_dates(engine, end)
         if pending_retry_dates:
             retry_start = min(pending_retry_dates)
             if retry_start < start:
                 print(
-                    f"⚠ Reprise automatique depuis {format_date_fr(retry_start)} "
-                    f"pour rejouer un jour precedemment incomplet."
+                    f"⚠ Donnee manquante enfin arrivee : reprise depuis "
+                    f"{format_date_fr(retry_start)} pour integrer ce jour."
                 )
                 start = retry_start
 
