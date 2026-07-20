@@ -29,6 +29,7 @@ ROOT = Path(__file__).parent.parent
 OUTPUTS = ROOT / "outputs"
 CREDS_FILE = ROOT / "connections" / "credentials.json"
 TOKEN_FILE = ROOT / "connections" / "token.json"
+COMMISSION_STATE_FILE = ROOT / "logs" / "commission_retry_state.json"
 SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 
 sys.path.insert(0, str(ROOT))
@@ -99,9 +100,44 @@ def load_total_warnings() -> list[dict]:
         return []
 
 
-def build_html_body(date_part: str, file_names: list[str], sync_errors: list[str], total_warnings: list[dict] = None) -> str:
+def load_pending_retries() -> list[dict]:
+    """Dates toujours a 0 (GADD et/ou ADS) en attente que la donnee source arrive.
+    Alimente par 05_commission.py dans commission_retry_state.json."""
+    if not COMMISSION_STATE_FILE.exists():
+        return []
+    try:
+        state = json.loads(COMMISSION_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    return state.get("pending_retries", []) or []
+
+
+def build_html_body(date_part: str, file_names: list[str], sync_errors: list[str], total_warnings: list[dict] = None, pending_retries: list[dict] = None) -> str:
     """Construit le corps HTML de l'email."""
     total_warnings = total_warnings or []
+    pending_retries = pending_retries or []
+
+    # ── Bannière en tete de mail : dates encore a 0 en attente de la donnee source ──
+    pending_html = ""
+    if pending_retries:
+        rows = "".join(
+            f'<tr><td style="padding:6px 12px;border:1px solid #e0e0e0;color:#856404;">'
+            f'⏳ {item.get("date","?")} — {item.get("metric","?")} : {item.get("reason","")}</td></tr>'
+            for item in sorted(pending_retries, key=lambda i: i.get("date", ""))
+        )
+        pending_html = f"""
+        <div style="margin:0 0 20px;padding:15px;background:#fff3cd;border-left:4px solid #ffc107;border-radius:4px;">
+            <h3 style="margin:0 0 10px;color:#856404;">⏳ Date(s) toujours a 0 — non commissionnee(s)</h3>
+            <p style="margin:0 0 10px;color:#856404;font-size:13px;">
+                En attente que la donnee source arrive. Ces dates ne sont PAS incluses
+                dans le calcul tant qu'elles restent a 0.
+            </p>
+            <table style="border-collapse:collapse;width:100%;">
+                {rows}
+            </table>
+        </div>
+        """
+
     errors_html = ""
     if sync_errors:
         rows = "".join(
@@ -132,9 +168,10 @@ def build_html_body(date_part: str, file_names: list[str], sync_errors: list[str
         )
         totals_html = f"""
         <div style="margin-top:20px;padding:15px;background:#f8d7da;border-left:4px solid #dc3545;border-radius:4px;">
-            <h3 style="margin:0 0 10px;color:#721c24;">⚠ Écarts de totaux détectés ({len(total_warnings)})</h3>
+            <h3 style="margin:0 0 10px;color:#721c24;">⚠ Anomalies détectées ({len(total_warnings)})</h3>
             <p style="margin:0 0 10px;color:#721c24;font-size:13px;">
-                Les totaux du fichier Excel diffèrent de ceux de la base de données. Vérifiez la cohérence.
+                Écarts de totaux, canaux non rattachés à un tarif, ou doublons d'identifiant.
+                Argent sensible : vérifier avant paiement.
             </p>
             <table style="border-collapse:collapse;width:100%;">
                 {rows}
@@ -159,6 +196,7 @@ def build_html_body(date_part: str, file_names: list[str], sync_errors: list[str
         </div>
 
         <div style="padding:20px;background:#f8f9fa;border:1px solid #e0e0e0;border-top:none;">
+            {pending_html}
             <h2 style="color:#2F5496;margin-top:0;">Fichiers joints</h2>
             <ul>
                 {files_html}
@@ -256,6 +294,7 @@ def send_email(file_paths: list[Path], recipient: str):
 
     sync_errors = load_sync_errors()
     total_warnings = load_total_warnings()
+    pending_retries = load_pending_retries()
 
     msg = MIMEMultipart("mixed")
     msg["From"] = GMAIL_USER
@@ -264,7 +303,7 @@ def send_email(file_paths: list[Path], recipient: str):
 
     file_names = [f.name for f in file_paths]
 
-    html_body = build_html_body(date_part, file_names, sync_errors, total_warnings)
+    html_body = build_html_body(date_part, file_names, sync_errors, total_warnings, pending_retries)
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     # Pieces jointes
@@ -299,6 +338,8 @@ def send_email(file_paths: list[Path], recipient: str):
         print(f"  {len(sync_errors)} alerte(s) sync incluse(s) dans le mail.")
     if total_warnings:
         print(f"  {len(total_warnings)} alerte(s) totaux incluse(s) dans le mail.")
+    if pending_retries:
+        print(f"  {len(pending_retries)} date(s) toujours a 0 signalee(s) en tete de mail.")
 
 
 def main():
