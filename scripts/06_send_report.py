@@ -209,28 +209,12 @@ def build_html_body(date_part: str, file_names: list[str], sync_errors: list[str
                     <th style="padding:8px 12px;text-align:left;">Description</th>
                 </tr>
                 <tr style="background:white;">
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>BA Animation (GADD)</strong></td>
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Commissions GADD — BA Animation</td>
+                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>GADD</strong></td>
+                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Commissions GADD — tous canaux/produits</td>
                 </tr>
                 <tr style="background:#f2f2f2;">
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>BA Animation (ADS)</strong></td>
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Commissions ADS — BA Animation</td>
-                </tr>
-                <tr style="background:white;">
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>BA Class. &amp; AGENCE (GADD)</strong></td>
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Commissions GADD — BA Classiques &amp; BA Agence</td>
-                </tr>
-                <tr style="background:#f2f2f2;">
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>BA Class. &amp; AGENCE (ADS)</strong></td>
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Commissions ADS — BA Classiques &amp; BA Agence</td>
-                </tr>
-                <tr style="background:white;">
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>MA Acquisition (GADD)</strong></td>
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Commissions GADD — MA Acquisition</td>
-                </tr>
-                <tr style="background:#f2f2f2;">
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>MA Acquisition (ADS)</strong></td>
-                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Commissions ADS — MA Acquisition</td>
+                    <td style="padding:8px 12px;border:1px solid #e0e0e0;"><strong>ADS (New Users)</strong></td>
+                    <td style="padding:8px 12px;border:1px solid #e0e0e0;">Commissions ADS — tous canaux/produits</td>
                 </tr>
             </table>
 
