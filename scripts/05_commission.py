@@ -542,19 +542,32 @@ def detect_pending_retries(daily_totals):
     sorted_totals = sorted(daily_totals.items())
     zero_run = []
 
-    def flush_zero_run(next_totals=None):
+    def flush_zero_run(next_totals=None, trailing=False):
         nonlocal zero_run
         if not zero_run:
             return
 
         first_idx = zero_run[0][0]
         prev_totals = sorted_totals[first_idx - 1][1] if first_idx > 0 else None
-        if prev_totals and next_totals and has_any_activity(prev_totals) and has_any_activity(next_totals):
+        actif_avant = bool(prev_totals) and has_any_activity(prev_totals)
+
+        encadre = actif_avant and bool(next_totals) and has_any_activity(next_totals)
+        # BORD DROIT. Une serie de zeros en FIN de plage n'a pas de jour suivant
+        # PAR CONSTRUCTION -- exiger `next_totals` la rendait indetectable. Or
+        # c'est le cas le plus dangereux : le dernier jour est justement celui
+        # qu'on commissionne. Le 2026-08-11 est passe par ce trou (2177 agents
+        # a 0, GADD et ADS, apres un 10/08 a 3981) et un classeur de
+        # commissions vide est parti par mail, job vert.
+        borde = trailing and actif_avant
+
+        if encadre or borde:
+            raison = ("GADD et ADS a 0 entre deux jours actifs" if encadre
+                      else "GADD et ADS a 0 en fin de plage, apres un jour actif")
             for _, retry_date in zero_run:
                 pending.append({
                     "date": retry_date.isoformat(),
                     "metric": "GADD+ADS",
-                    "reason": "GADD et ADS a 0 entre deux jours actifs",
+                    "reason": raison,
                 })
 
         zero_run = []
@@ -581,6 +594,10 @@ def detect_pending_retries(daily_totals):
                 "metric": "GADD",
                 "reason": "GADD total a 0 alors que ADS est positif",
             })
+
+    # La boucle ne vidait JAMAIS `zero_run` en sortant : une plage se terminant
+    # par des zeros les jetait en silence. Second defaut du meme cas.
+    flush_zero_run(trailing=True)
 
     return pending
 
@@ -1116,6 +1133,34 @@ def main():
     if pending_retries:
         retry_text = ", ".join(f"{item['metric']} {item['date']}" for item in pending_retries)
         print(f"\n⚠ Reprise automatique programmee pour : {retry_text}")
+
+    # ── GARDE-FOU : NE JAMAIS COMMISSIONNER UNE PERIODE ENTIEREMENT A ZERO ──
+    #
+    # Cette verification ne depend PAS des jours voisins, contrairement a
+    # `detect_pending_retries` : une periode commissionnee ou personne n'a rien
+    # fait n'est jamais legitime a payer, qu'elle soit encadree ou non. C'est le
+    # cas du 2026-08-12, ou la periode etait le seul 11/08 -- donc sans jour
+    # precedent DANS la plage, donc invisible pour la detection par voisinage.
+    #
+    # La cause est en amont et n'est pas reparable ici : la colonne du jour
+    # n'etait pas remplie dans le classeur source (`GLOBALE PERFORMANCE
+    # 20260810.xlsx`). On refuse de produire le classeur plutot que d'en envoyer
+    # un a zero. L'etat de reprise, lui, est DEJA persiste ci-dessus : la date
+    # sera reprise d'elle-meme quand la donnee arrivera.
+    totaux_periode = get_daily_metric_totals(engine, date_start, date_end)
+    if totaux_periode and not any(has_any_activity(t) for t in totaux_periode.values()):
+        jours = ", ".join(d.isoformat() for d in sorted(totaux_periode))
+        print(
+            "\n" + "=" * 60
+            + "\n  BLOQUE : periode entierement a 0 (GADD et ADS)."
+            + f"\n  Jour(s) concerne(s) : {jours}"
+            + "\n  Aucun classeur n'est genere, aucun rapport n'est envoye."
+            + "\n  Cause probable : colonne du jour non remplie dans le classeur"
+            + "\n  source. Demander un renvoi ; la reprise est deja programmee."
+            + "\n" + "=" * 60,
+            file=sys.stderr,
+        )
+        sys.exit(5)
 
     print("\n✅ Feuilles ajoutées : GADD, ADS (New Users)")
 
