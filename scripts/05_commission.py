@@ -1150,6 +1150,32 @@ def main():
     totaux_periode = get_daily_metric_totals(engine, date_start, date_end)
     if totaux_periode and not any(has_any_activity(t) for t in totaux_periode.values()):
         jours = ", ".join(d.isoformat() for d in sorted(totaux_periode))
+
+        # 🔴 INSCRIRE LA REPRISE ICI, ET NE PAS COMPTER SUR `refresh_commission_state`.
+        #
+        # J'ai d'abord ecrit que « l'etat de reprise est deja persiste ci-dessus,
+        # la date se rattrapera d'elle-meme ». LE REJEU DU 2026-08-13 A PROUVE QUE
+        # C'ETAIT FAUX : apres blocage sur le 11/08, `pending_retries` ne portait
+        # que les deux vieilles dates de juin et juillet.
+        #
+        # La raison est structurelle. `detect_pending_retries` raisonne par
+        # VOISINAGE, et la periode commissionnee etait le seul 11/08 : pas de
+        # jour precedent DANS la plage, donc aucun voisin actif, donc rien a
+        # detecter. C'est exactement la limite que le garde-fou ci-dessous existe
+        # pour couvrir — mais couvrir l'ENVOI ne suffit pas : sans cette
+        # inscription, la journee serait bloquee puis OUBLIEE, et il faudrait un
+        # geste humain pour la rattraper le jour ou la donnee arrive.
+        etat = load_commission_state()
+        en_attente = list(etat.get("pending_retries", []))
+        en_attente.extend({
+            "date": d.isoformat(),
+            "metric": "GADD+ADS",
+            "reason": "periode entierement a 0 — commission bloquee, en attente de la donnee source",
+        } for d in sorted(totaux_periode))
+        # `save_commission_state` deduplique par (date, metric) : un blocage
+        # repete n'empile pas de doublons.
+        save_commission_state({"pending_retries": en_attente})
+
         print(
             "\n" + "=" * 60
             + "\n  BLOQUE : periode entierement a 0 (GADD et ADS)."
